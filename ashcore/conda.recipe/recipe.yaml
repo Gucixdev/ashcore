@@ -1,0 +1,27 @@
+package:
+  name: ashcore
+  version: "0.1.0"
+
+source:
+  path: ..
+
+build:
+  script: echo "Pure-Mojo source package — no compilation step"
+
+requirements:
+  run:
+    - max >=26.4.0,<27
+
+about:
+  home: https://github.com/Gucixdev/ash
+  license: MIT
+  license_file: ../LICENSE
+  summary: Arena allocator, thread pool, DAG schedulers and sync primitives for Mojo
+  description: |
+    ashcore provides low-level systems primitives for Mojo:
+    - Arena bump allocator (O(1) reset, auto-growing regions)
+    - ThreadPool with work-sharing atomic counter
+    - TaskGraph (static DAG, level barriers) and ReactiveGraph (barrier-free)
+    - TicketLock, RWLock, Semaphore, Once
+    - SPSCQueue and EventQueue (lock-free ring buffers)
+    - Zero-cost debug guards (comptime DEBUG flag)

@@ -16,15 +16,15 @@ Low-level systems primitives for Mojo — arena allocator, thread pool, DAG sche
 ## Install
 
 ```bash
-git clone git@github.com:Gucixdev/ashcore.git
-cd ashcore
+git clone https://github.com/Gucixdev/ash.git
+cd ash/ashcore
 magic install
 ```
 
 Run anything with:
 
 ```bash
-magic run mojo run -I src <file.mojo>
+magic run mojo run -I . <file.mojo>
 ```
 
 ---
@@ -146,7 +146,7 @@ guard.run[init]()   # safe to call from any number of threads
 Fixed thread pool. Default worker count = `num_physical_cores()`. Dispatches in chunks of 64 tasks per atomic to minimize cache-line contention.
 
 ```mojo
-from ashcore.jobs import ThreadPool
+from ashcore.threadpool import ThreadPool
 
 var pool = ThreadPool()        # physical core count
 var data = List[Int](capacity=1024)
@@ -163,7 +163,7 @@ pool.run_range[process](10, 20) # calls process(10..19)
 Shorthand without creating a pool:
 
 ```mojo
-from ashcore.jobs import parallel_for
+from ashcore.parallel import parallel_for
 
 @parameter
 def work(i: Int):
@@ -182,7 +182,8 @@ Static DAGs with dependency tracking. Both use the same build API.
 **TaskGraph** — level-by-level with barriers between levels:
 
 ```mojo
-from ashcore.jobs import TaskGraph, ThreadPool
+from ashcore.taskgraph  import TaskGraph
+from ashcore.threadpool import ThreadPool
 
 var pool = ThreadPool()
 var g = TaskGraph()
@@ -203,7 +204,8 @@ g.execute[run](pool)   # a and b run in parallel, then c
 **ReactiveGraph** — barrier-free: each job enqueues its dependents atomically as it finishes. Lower overhead for deep graphs with uneven runtimes.
 
 ```mojo
-from ashcore.jobs import ReactiveGraph, ThreadPool
+from ashcore.reactivegraph import ReactiveGraph
+from ashcore.threadpool    import ThreadPool
 
 var pool = ThreadPool()
 var g = ReactiveGraph()
@@ -266,7 +268,7 @@ if r.ok:
 
 ### Debug guards
 
-All guards compile away to nothing when `DEBUG = False` (the default). Enable with `sed -i 's/DEBUG: Bool = False/DEBUG: Bool = True/' src/ashcore/debug.mojo`.
+All guards compile away to nothing when `DEBUG = False` (the default). Enable with `sed -i 's/DEBUG: Bool = False/DEBUG: Bool = True/' ashcore/debug.mojo`.
 
 ```mojo
 from ashcore.debug import dbg_assert, dbg_bounds, dbg_unreachable

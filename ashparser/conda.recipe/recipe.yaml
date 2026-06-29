@@ -1,0 +1,26 @@
+package:
+  name: ashparser
+  version: "0.1.0"
+
+source:
+  path: ..
+
+build:
+  script: echo "Pure-Mojo source package — no compilation step"
+
+requirements:
+  run:
+    - max >=26.4.0,<27
+
+about:
+  home: https://github.com/Gucixdev/ash
+  license: MIT
+  license_file: ../LICENSE
+  summary: Zero-dependency parser combinator library for Mojo
+  description: |
+    ashparser is a zero-dependency parser combinator library for Mojo.
+    Parsers compose at compile time via @parameter def — no runtime closures.
+    - Primitives: satisfy, byte, tag, take_while, digits, ident, quoted_string, …
+    - Combinators: opt, many, choice, seq, sep_by, between, peek, recognize, …
+    - Stateful parsing: Ctx[S] + CtxResult[T,S] with full combinator set
+    - SourceMap: O(log n) byte-offset → line:col lookup

@@ -6,14 +6,20 @@ Mojo libraries — fast, low-level, zero-dependency.
 
 | Library | Description |
 |---------|-------------|
-| [ashcore](ashcore/) | Arena allocator, thread pool, DAG job system, sync primitives |
-| [ashparser](ashparser/) | Parser combinator library with stateful parsing support |
+| [ashcore](ashcore/) | Arena allocator, thread pool, DAG schedulers, sync primitives, lock-free queues |
+| [ashparser](ashparser/) | Parser combinator library with stateful parsing and source-map error reporting |
 
 ## Requirements
 
-- [Mojo / MAX](https://docs.modular.com/mojo/) via [pixi](https://prefix.dev/)
+- [Mojo / MAX](https://docs.modular.com/mojo/) ≥ 26.4 via [Magic](https://docs.modular.com/magic/)
+- linux-64
 
-Each library has its own `pixi.toml` and is self-contained.
+## Install
+
+```bash
+git clone https://github.com/Gucixdev/ash.git
+cd ash/ashcore && magic install   # or cd ash/ashparser
+```
 
 ## Getting started
 
@@ -29,30 +35,52 @@ cd ashparser && ./test
 
 ```
 ash/
-├── README.md          ← this file
+├── README.md
+├── CHANGELOG.md
 ├── LICENSE
-├── .gitignore
-├── .gitattributes
-├── ashcore/           ← arena, threadpool, DAG, sync
+├── ashcore/
 │   ├── README.md
 │   ├── pixi.toml
-│   ├── src/ashcore/
+│   ├── conda.recipe/
+│   ├── ashcore/          ← source package
+│   │   ├── arena.mojo
+│   │   ├── shared_arena.mojo
+│   │   ├── sync.mojo
+│   │   ├── threadpool.mojo
+│   │   ├── taskgraph.mojo
+│   │   ├── reactivegraph.mojo
+│   │   ├── parallel.mojo
+│   │   ├── queue.mojo
+│   │   ├── debug.mojo
+│   │   └── gpu.mojo
 │   ├── benchmarks/
 │   ├── tests/
 │   ├── example/
-│   ├── bench          ← ./bench [arena|pool|sync|reduce|sweep]
-│   ├── compare        ← ./compare (Mojo vs C vs Python)
-│   ├── stresstest     ← ./stresstest
-│   └── test           ← ./test (all phases)
-└── ashparser/         ← parser combinators
+│   ├── bench
+│   ├── compare
+│   ├── stresstest
+│   └── test
+└── ashparser/
     ├── README.md
     ├── pixi.toml
-    ├── src/ashparser/
+    ├── conda.recipe/
+    ├── ashparser/        ← source package
+    │   ├── input.mojo
+    │   ├── result.mojo
+    │   ├── sourcemap.mojo
+    │   ├── prim.mojo
+    │   ├── comb.mojo
+    │   ├── state.mojo
+    │   └── statecomb.mojo
     ├── benchmarks/
     ├── tests/
     ├── example/
-    ├── bench          ← ./bench
-    ├── compare        ← ./compare [csv|json|int]
-    ├── stresstest     ← ./stresstest
-    └── test           ← ./test
+    ├── bench
+    ├── compare
+    ├── stresstest
+    └── test
 ```
+
+## License
+
+[MIT](LICENSE)

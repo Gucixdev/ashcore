@@ -6,26 +6,27 @@ Parsers compose at compile time via `@parameter def`.
 ## Quick start
 
 ```bash
-magic run mojo run -I src example/csv.mojo
-magic run mojo run -I src example/json.mojo
+magic run mojo run -I . example/csv.mojo
+magic run mojo run -I . example/json.mojo
 ./test
 ```
 
 ## What's inside
 
 ```
-src/ashparser/
+ashparser/
   input.mojo      — zero-copy Input (address + pos, no allocation)
-  result.mojo     — ParseResult[T]
+  result.mojo     — ParseResult[T] with message_ctx / message_ctx_fast
+  sourcemap.mojo  — SourceMap (O(n) build, O(log n) line_col lookup) + LineCol
   prim.mojo       — primitives: satisfy, byte, tag, take_while, digits, ident,
                     one_of, none_of, line_ending, rest_of_line,
                     hex_digit/hex_digits, parse_uint, parse_int, quoted_string
-  comb.mojo       — combinators: opt, many, many1, map, choice, seq,
+  comb.mojo       — combinators: opt, many, many1, map, attempt, choice, seq,
                     skip_left, skip_right, between, sep_by, sep_by1,
                     peek, not_followed_by, verify, skip_many, skip_many1,
                     count, recognize
   state.mojo      — Ctx[S] + CtxResult[T,S] for stateful parsing
-  statecomb.mojo  — stateful combinators: slift, sget, smodify, smap,
+  statecomb.mojo  — stateful combinators: slift, sget, smodify, smap, sattempt,
                     schoice, smany, smany1, sskip_left, sskip_right,
                     ssep_by, ssep_by1
 ```
@@ -36,9 +37,10 @@ src/ashparser/
 
 | File | Demonstrates |
 |------|--------------|
-| `csv.mojo` | `sep_by`, `take_while` |
+| `csv.mojo` | `sep_by`, `take_while` (RFC 4180) |
+| `json.mojo` | `choice`, `quoted_string`, `sep_by` (RFC 8259) |
+| `http_headers.mojo` | `tag`, `take_while`, OWS handling (RFC 9110) |
 | `calc.mojo` | `parse_uint`, operator folding |
-| `json.mojo` | `choice`, `quoted_string`, `sep_by` |
 | `toml.mojo` | `rest_of_line`, `parse_int`, `quoted_string` |
 | `xml.mojo` | `between`, `none_of`, attributes |
 | `yaml.mojo` | `rest_of_line`, `one_of` |
@@ -85,7 +87,15 @@ var r = smany[UInt8, Int, digit_and_count](ctx)
 ./test         # all of the above
 ```
 
-## Mojo 1.0.0b2 constraints
+## Install
+
+```bash
+git clone https://github.com/Gucixdev/ash.git
+cd ash/ashparser
+magic install
+```
+
+## Mojo constraints
 
 - All parsers passed as combinator arguments must be `@parameter def`
 - No tuple return types → use `Pair[A,B]` or `ParseResult[Pair[A,B]]`
