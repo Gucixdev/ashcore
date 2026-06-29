@@ -15,26 +15,32 @@ def main() raises:
     # digits benchmark
     var s_digits = String("12345rest")
     var t0 = perf_counter_ns()
+    var acc_d = Int(0)
     for _ in range(N):
         var r = digits(Input.from_string(s_digits))
-        _ = r.ok
+        acc_d += r.rest.pos
     var digits_ns = perf_counter_ns() - t0
+    _ = acc_d
 
     # ident benchmark
     var s_ident = String("foo_bar123rest")
     t0 = perf_counter_ns()
+    var acc_id = Int(0)
     for _ in range(N):
         var r = ident(Input.from_string(s_ident))
-        _ = r.ok
+        acc_id += r.rest.pos
     var ident_ns = perf_counter_ns() - t0
+    _ = acc_id
 
-    # take_while benchmark
+    # take_while benchmark (force String extraction to measure real cost)
     var s_tw = String("abcdefghijklmnopqrstuvwxyz123")
     t0 = perf_counter_ns()
+    var acc_tw = Int(0)
     for _ in range(N):
         var r = take_while[_is_alpha](Input.from_string(s_tw))
-        _ = r.ok
+        acc_tw += r.get().byte_length()
     var tw_ns = perf_counter_ns() - t0
+    _ = acc_tw
 
     print("N=" + String(N))
     print("digits_ns=" + String(digits_ns))

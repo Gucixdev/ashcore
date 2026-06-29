@@ -55,3 +55,18 @@ struct CtxResult[T: Copyable & Movable & ImplicitlyDeletable,
     def get(self) -> Self.T:
         """Unwrap the parsed value.  Only call when ok == True."""
         return self._val.value().copy()
+
+    def message_ctx(self, original: Input) -> String:
+        """Format 'msg at L:C (byte N)' using line/col from original input."""
+        var pos = self.rest.input.pos
+        var ptr = original._ptr()
+        var line = 1
+        var col = 1
+        for i in range(pos):
+            if i < original.len and ptr[i] == 10:
+                line += 1
+                col = 1
+            else:
+                col += 1
+        return (self.msg + " at " + String(line) + ":" + String(col)
+                + " (byte " + String(pos) + ")")

@@ -68,6 +68,11 @@ struct Input(Copyable, ImplicitlyCopyable, Movable, ImplicitlyDeletable):
         return Input(self._addr, new_pos, self.len)
 
     @always_inline
+    def at(self, pos: Int) -> Input:
+        """Return Input with read head at absolute `pos`. Caller ensures bounds."""
+        return Input(self._addr, pos, self.len)
+
+    @always_inline
     def remaining(self) -> Int:
         return self.len - self.pos
 

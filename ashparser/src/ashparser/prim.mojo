@@ -19,9 +19,8 @@ def satisfy[pred: def(UInt8) capturing -> Bool](inp: Input) -> ParseResult[UInt8
         var r = ParseResult[UInt8].failure(inp, "satisfy: unexpected EOF")
         return r^
     var b = inp.peek()
-    var ok = pred(b)
-    if not ok:
-        var r = ParseResult[UInt8].failure(inp, "satisfy: predicate failed at pos " + String(inp.pos))
+    if not pred(b):
+        var r = ParseResult[UInt8].failure(inp, "satisfy: predicate failed")
         return r^
     var r = ParseResult[UInt8].success(b, inp.advance(1))
     return r^
@@ -36,9 +35,7 @@ def byte[B: UInt8](inp: Input) -> ParseResult[UInt8]:
         var r = ParseResult[UInt8].failure(inp, "byte: unexpected EOF")
         return r^
     if inp.peek() != B:
-        var r = ParseResult[UInt8].failure(
-            inp, "byte: expected " + String(B) + " got " + String(inp.peek())
-        )
+        var r = ParseResult[UInt8].failure(inp, "byte: no match")
         return r^
     var r = ParseResult[UInt8].success(B, inp.advance(1))
     return r^
@@ -51,14 +48,16 @@ def tag[s: StringLiteral](inp: Input) -> ParseResult[String]:
     """Consume the exact byte sequence of string literal `s`."""
     var n = s.byte_length()
     if inp.remaining() < n:
-        var r = ParseResult[String].failure(inp, "tag: expected '" + s + "'")
+        var r = ParseResult[String].failure(inp, "tag: unexpected EOF")
         return r^
+    var inp_ptr = inp._ptr()
+    var s_ptr = s.unsafe_ptr()
     for i in range(n):
-        if inp.peek_at(i) != UInt8(ord(s[i])):
-            var r = ParseResult[String].failure(inp, "tag: expected '" + s + "'")
+        if inp_ptr[inp.pos + i] != s_ptr[i]:
+            var r = ParseResult[String].failure(inp, "tag: no match")
             return r^
     var val = String(s)
-    var r = ParseResult[String].success(val, inp.advance(n))
+    var r = ParseResult[String].success(val, inp.at(inp.pos + n))
     return r^
 
 
@@ -67,26 +66,26 @@ def tag[s: StringLiteral](inp: Input) -> ParseResult[String]:
 @parameter
 def take_while[pred: def(UInt8) capturing -> Bool](inp: Input) -> ParseResult[String]:
     """Consume bytes while pred holds.  Always succeeds (may return empty string)."""
-    var start = inp.pos
-    var cur = inp
-    while not cur.is_empty():
-        var ok = pred(cur.peek())
-        if not ok:
+    var pos = inp.pos
+    var end = inp.len
+    var ptr = inp._ptr()
+    while pos < end:
+        if not pred(ptr[pos]):
             break
-        cur = cur.advance(1)
-    var val = inp.slice_str(start, cur.pos)
-    var r = ParseResult[String].success(val, cur)
+        pos += 1
+    var val = inp.slice_str(inp.pos, pos)
+    var r = ParseResult[String].success(val, inp.at(pos))
     return r^
 
 
 @parameter
 def take_while1[pred: def(UInt8) capturing -> Bool](inp: Input) -> ParseResult[String]:
     """Like take_while but fails if zero bytes matched."""
-    var r0 = take_while[pred](inp)
-    if r0.get().byte_length() == 0:
-        var r = ParseResult[String].failure(inp, "take_while1: no bytes matched at pos " + String(inp.pos))
-        return r^
-    return r0^
+    var r = take_while[pred](inp)
+    if r.rest.pos == inp.pos:
+        var out = ParseResult[String].failure(inp, "take_while1: no bytes matched")
+        return out^
+    return r^
 
 
 # ── digit / alpha / alphanum ──────────────────────────────────────────────────
@@ -142,17 +141,19 @@ def digits(inp: Input) -> ParseResult[String]:
 def ident(inp: Input) -> ParseResult[String]:
     """Consume an identifier: alpha (alphanum | _)*.  Fails if no leading alpha."""
     if inp.is_empty() or not _is_alpha(inp.peek()):
-        var r = ParseResult[String].failure(inp, "ident: expected letter at pos " + String(inp.pos))
+        var r = ParseResult[String].failure(inp, "ident: expected letter")
         return r^
     var start = inp.pos
-    var cur = inp.advance(1)
-    while not cur.is_empty():
-        var b = cur.peek()
+    var pos = inp.pos + 1
+    var end = inp.len
+    var ptr = inp._ptr()
+    while pos < end:
+        var b = ptr[pos]
         if not (_is_alphanum(b) or b == 95):   # 95 = '_'
             break
-        cur = cur.advance(1)
-    var val = inp.slice_str(start, cur.pos)
-    var r = ParseResult[String].success(val, cur)
+        pos += 1
+    var val = inp.slice_str(start, pos)
+    var r = ParseResult[String].success(val, inp.at(pos))
     return r^
 
 
@@ -162,9 +163,7 @@ def ident(inp: Input) -> ParseResult[String]:
 def eof(inp: Input) -> ParseResult[UInt8]:
     """Succeeds only at end of input.  Returns 0."""
     if not inp.is_empty():
-        var r = ParseResult[UInt8].failure(
-            inp, "eof: expected end, got " + String(inp.peek()) + " at pos " + String(inp.pos)
-        )
+        var r = ParseResult[UInt8].failure(inp, "eof: expected end of input")
         return r^
     var r = ParseResult[UInt8].success(0, inp)
     return r^
@@ -180,11 +179,12 @@ def one_of[chars: StringLiteral](inp: Input) -> ParseResult[UInt8]:
         return r^
     var b = inp.peek()
     var n = chars.byte_length()
+    var cp = chars.unsafe_ptr()
     for i in range(n):
-        if UInt8(ord(chars[i])) == b:
+        if cp[i] == b:
             var r = ParseResult[UInt8].success(b, inp.advance(1))
             return r^
-    var r = ParseResult[UInt8].failure(inp, "one_of: no match at pos " + String(inp.pos))
+    var r = ParseResult[UInt8].failure(inp, "one_of: no match")
     return r^
 
 
@@ -196,9 +196,10 @@ def none_of[chars: StringLiteral](inp: Input) -> ParseResult[UInt8]:
         return r^
     var b = inp.peek()
     var n = chars.byte_length()
+    var cp = chars.unsafe_ptr()
     for i in range(n):
-        if UInt8(ord(chars[i])) == b:
-            var r = ParseResult[UInt8].failure(inp, "none_of: excluded byte at pos " + String(inp.pos))
+        if cp[i] == b:
+            var r = ParseResult[UInt8].failure(inp, "none_of: excluded byte")
             return r^
     var r = ParseResult[UInt8].success(b, inp.advance(1))
     return r^
@@ -218,7 +219,7 @@ def line_ending(inp: Input) -> ParseResult[String]:
     if inp.peek() == 10:
         var r = ParseResult[String].success(String("\n"), inp.advance(1))
         return r^
-    var r = ParseResult[String].failure(inp, "line_ending: expected newline at pos " + String(inp.pos))
+    var r = ParseResult[String].failure(inp, "line_ending: expected newline")
     return r^
 
 
@@ -226,15 +227,17 @@ def line_ending(inp: Input) -> ParseResult[String]:
 def rest_of_line(inp: Input) -> ParseResult[String]:
     """Consume bytes up to (not including) \\n or \\r\\n, then consume the newline.
     Returns the line content without the newline.  Always succeeds (empty at EOF)."""
-    var cur = inp
-    while not cur.is_empty() and cur.peek() != 10 and cur.peek() != 13:
-        cur = cur.advance(1)
-    var val = inp.slice_str(inp.pos, cur.pos)
-    if not cur.is_empty() and cur.peek() == 13 and cur.remaining() >= 2 and cur.peek_at(1) == 10:
-        cur = cur.advance(2)
-    elif not cur.is_empty() and cur.peek() == 10:
-        cur = cur.advance(1)
-    var r = ParseResult[String].success(val, cur)
+    var pos = inp.pos
+    var end = inp.len
+    var ptr = inp._ptr()
+    while pos < end and ptr[pos] != 10 and ptr[pos] != 13:
+        pos += 1
+    var val = inp.slice_str(inp.pos, pos)
+    if pos < end and ptr[pos] == 13 and pos + 1 < end and ptr[pos + 1] == 10:
+        pos += 2
+    elif pos < end and ptr[pos] == 10:
+        pos += 1
+    var r = ParseResult[String].success(val, inp.at(pos))
     return r^
 
 
@@ -255,8 +258,16 @@ def hex_digit(inp: Input) -> ParseResult[UInt8]:
 @parameter
 def hex_digits(inp: Input) -> ParseResult[String]:
     """Consume one or more hex digits."""
-    var r = take_while1[_is_hex](inp)
-    return r^
+    var pos = inp.pos
+    var end = inp.len
+    var ptr = inp._ptr()
+    while pos < end and _is_hex(ptr[pos]):
+        pos += 1
+    if pos == inp.pos:
+        var out = ParseResult[String].failure(inp, "hex_digits: no hex digits")
+        return out^
+    var out = ParseResult[String].success(inp.slice_str(inp.pos, pos), inp.at(pos))
+    return out^
 
 
 # ── parse_uint / parse_int ────────────────────────────────────────────────────
@@ -264,43 +275,40 @@ def hex_digits(inp: Input) -> ParseResult[String]:
 @parameter
 def parse_uint(inp: Input) -> ParseResult[UInt64]:
     """Consume one or more ASCII digits, parse as UInt64."""
-    var r = digits(inp)
-    if not r.ok:
-        var out = ParseResult[UInt64].failure(inp, "parse_uint: no digits at pos " + String(inp.pos))
+    var pos = inp.pos
+    var end = inp.len
+    var ptr = inp._ptr()
+    if pos >= end or not _is_digit(ptr[pos]):
+        var out = ParseResult[UInt64].failure(inp, "parse_uint: no digits")
         return out^
-    var s = r.get()
     var val = UInt64(0)
-    var n = s.byte_length()
-    var p = s.unsafe_ptr()
-    for i in range(n):
-        val = val * 10 + UInt64(Int(p[i]) - 48)
-    _ = s
-    var out = ParseResult[UInt64].success(val, r.rest)
+    while pos < end and _is_digit(ptr[pos]):
+        val = val * 10 + UInt64(ptr[pos]) - 48
+        pos += 1
+    var out = ParseResult[UInt64].success(val, inp.at(pos))
     return out^
 
 
 @parameter
 def parse_int(inp: Input) -> ParseResult[Int64]:
     """Consume optional '-' then digits, parse as Int64."""
+    var pos = inp.pos
+    var end = inp.len
+    var ptr = inp._ptr()
     var neg = False
-    var cur = inp
-    if not cur.is_empty() and cur.peek() == 45:
+    if pos < end and ptr[pos] == 45:  # '-'
         neg = True
-        cur = cur.advance(1)
-    var r = digits(cur)
-    if not r.ok:
-        var out = ParseResult[Int64].failure(inp, "parse_int: expected digits at pos " + String(inp.pos))
+        pos += 1
+    if pos >= end or not _is_digit(ptr[pos]):
+        var out = ParseResult[Int64].failure(inp, "parse_int: expected digits")
         return out^
-    var s = r.get()
     var val = Int64(0)
-    var n = s.byte_length()
-    var p = s.unsafe_ptr()
-    for i in range(n):
-        val = val * 10 + Int64(Int(p[i]) - 48)
-    _ = s
+    while pos < end and _is_digit(ptr[pos]):
+        val = val * 10 + Int64(ptr[pos]) - 48
+        pos += 1
     if neg:
         val = -val
-    var out = ParseResult[Int64].success(val, r.rest)
+    var out = ParseResult[Int64].success(val, inp.at(pos))
     return out^
 
 
@@ -310,38 +318,35 @@ def parse_int(inp: Input) -> ParseResult[Int64]:
 def quoted_string(inp: Input) -> ParseResult[String]:
     """Parse a double-quoted string with \\\" and \\\\ escapes.
     Returns the content without surrounding quotes."""
-    if inp.is_empty() or inp.peek() != 34:
-        var r = ParseResult[String].failure(inp, "quoted_string: expected '\"' at pos " + String(inp.pos))
+    if inp.is_empty() or inp.peek() != 34:  # '"'
+        var r = ParseResult[String].failure(inp, "quoted_string: expected '\"'")
         return r^
-    var cur = inp.advance(1)
-    var val = String("")
-    while not cur.is_empty():
-        var b = cur.peek()
-        if b == 34:
-            var r = ParseResult[String].success(val, cur.advance(1))
+    var pos = inp.pos + 1
+    var end = inp.len
+    var ptr = inp._ptr()
+    var buf = List[UInt8]()
+    while pos < end:
+        var b = ptr[pos]
+        if b == 34:  # closing '"'
+            buf.append(0)
+            var s = String(StringSlice(ptr=buf.unsafe_ptr(), length=len(buf) - 1))
+            var r = ParseResult[String].success(s, inp.at(pos + 1))
             return r^
-        if b == 92 and cur.remaining() >= 2:
-            var nxt = cur.peek_at(1)
+        if b == 92 and pos + 1 < end:  # backslash
+            var nxt = ptr[pos + 1]
             if nxt == 34:
-                val += String("\"")
-                cur = cur.advance(2)
+                buf.append(34); pos += 2
             elif nxt == 92:
-                val += String("\\")
-                cur = cur.advance(2)
+                buf.append(92); pos += 2
             elif nxt == 110:
-                val += String("\n")
-                cur = cur.advance(2)
+                buf.append(10); pos += 2   # \n
             elif nxt == 116:
-                val += String("\t")
-                cur = cur.advance(2)
+                buf.append(9); pos += 2    # \t
             elif nxt == 114:
-                val += String("\r")
-                cur = cur.advance(2)
+                buf.append(13); pos += 2   # \r
             else:
-                val += inp.slice_str(cur.pos + 1, cur.pos + 2)
-                cur = cur.advance(2)
+                buf.append(nxt); pos += 2
         else:
-            val += inp.slice_str(cur.pos, cur.pos + 1)
-            cur = cur.advance(1)
+            buf.append(b); pos += 1
     var r = ParseResult[String].failure(inp, "quoted_string: unterminated string")
     return r^

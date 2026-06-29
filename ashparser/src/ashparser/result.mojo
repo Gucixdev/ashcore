@@ -15,13 +15,16 @@ struct ParseResult[T: Copyable & Movable & ImplicitlyDeletable](
 
     Fields:
         ok   — True on success.
-        rest — Remaining input after consuming (valid only when ok == True).
-        msg  — Error description (valid only when ok == False).
+        rest — Remaining input after consuming (valid when ok == True).
+               On failure, rest == the input position where failure occurred.
+        msg  — Error description (valid when ok == False).
+
+    Use `.message_ctx(original)` for line:col-annotated error strings.
     """
-    var ok:    Bool
-    var _val:  Optional[Self.T]
-    var rest:  Input
-    var msg:   String
+    var ok:   Bool
+    var _val: Optional[Self.T]
+    var rest: Input
+    var msg:  String
 
     def __init__(out self, ok: Bool, val: Optional[Self.T], rest: Input, msg: String):
         self.ok   = ok
@@ -41,3 +44,18 @@ struct ParseResult[T: Copyable & Movable & ImplicitlyDeletable](
     def get(self) -> Self.T:
         """Unwrap the parsed value.  Only call when ok == True."""
         return self._val.value().copy()
+
+    def message_ctx(self, original: Input) -> String:
+        """Format 'msg at L:C (byte N)' using line/col from original input."""
+        var pos = self.rest.pos
+        var ptr = original._ptr()
+        var line = 1
+        var col = 1
+        for i in range(pos):
+            if i < original.len and ptr[i] == 10:
+                line += 1
+                col = 1
+            else:
+                col += 1
+        return (self.msg + " at " + String(line) + ":" + String(col)
+                + " (byte " + String(pos) + ")")

@@ -67,7 +67,7 @@ def many1[T: Copyable & Movable & ImplicitlyDeletable,
     """One-or-more applications of p.  Fails if zero matches."""
     var r0 = p(inp)
     if not r0.ok:
-        var out = ParseResult[List[T]].failure(inp, "many1: zero matches at pos " + String(inp.pos))
+        var out = ParseResult[List[T]].failure(inp, "many1: zero matches")
         return out^
     var results = List[T]()
     results.append(r0.get())
@@ -226,7 +226,7 @@ def sep_by1[T: Copyable & Movable & ImplicitlyDeletable,
     """One-or-more p separated by s.  Fails if zero matches."""
     var r0 = p(inp)
     if not r0.ok:
-        var out = ParseResult[List[T]].failure(inp, "sep_by1: no match at pos " + String(inp.pos))
+        var out = ParseResult[List[T]].failure(inp, "sep_by1: no match")
         return out^
     var results = List[T]()
     results.append(r0.get())
@@ -264,7 +264,7 @@ def not_followed_by[T: Copyable & Movable & ImplicitlyDeletable,
     """Succeed (returning 0) only if p would FAIL at current position.  Consumes nothing."""
     var r = p(inp)
     if r.ok:
-        var out = ParseResult[UInt8].failure(inp, "not_followed_by: unexpected match at pos " + String(inp.pos))
+        var out = ParseResult[UInt8].failure(inp, "not_followed_by: unexpected match")
         return out^
     var out = ParseResult[UInt8].success(0, inp)
     return out^
@@ -282,7 +282,7 @@ def verify[T: Copyable & Movable & ImplicitlyDeletable,
         var out = ParseResult[T].failure(inp, r.msg)
         return out^
     if not pred(r.get()):
-        var out = ParseResult[T].failure(inp, "verify: predicate failed at pos " + String(inp.pos))
+        var out = ParseResult[T].failure(inp, "verify: predicate failed")
         return out^
     return r^
 
@@ -309,7 +309,7 @@ def skip_many1[T: Copyable & Movable & ImplicitlyDeletable,
     """One-or-more applications of p, discarding all results.  Fails if zero matches."""
     var r0 = p(inp)
     if not r0.ok:
-        var out = ParseResult[UInt8].failure(inp, "skip_many1: zero matches at pos " + String(inp.pos))
+        var out = ParseResult[UInt8].failure(inp, "skip_many1: zero matches")
         return out^
     var cur = r0.rest
     while True:
@@ -333,7 +333,7 @@ def count[T: Copyable & Movable & ImplicitlyDeletable,
     for _ in range(N):
         var r = p(cur)
         if not r.ok:
-            var out = ParseResult[List[T]].failure(inp, "count: failed after " + String(len(results)) + " of " + String(N))
+            var out = ParseResult[List[T]].failure(inp, "count: not enough matches")
             return out^
         results.append(r.get())
         cur = r.rest

@@ -1,7 +1,7 @@
 """
 Benchmark: parse_int and hex_digits throughput.
 
-1M calls each: parse_int on "-12345", parse_uint on "99999", hex_digits on "1aFf00".
+Uses 4 distinct input strings round-robin to defeat loop-invariant code motion.
 
 Output (key=value):
     parse_int_ns=<total ns for 1M calls>
@@ -19,33 +19,36 @@ from std.time import perf_counter_ns
 def main() raises:
     var N = 1_000_000
 
-    var s_int  = String("-12345")
-    var s_uint = String("99999")
-    var s_hex  = String("1aFf00")
+    var ints  = List[String]()
+    ints.append(String("-12345")); ints.append(String("-99999"))
+    ints.append(String("-1"));    ints.append(String("-8765432"))
+    var uints = List[String]()
+    uints.append(String("99999")); uints.append(String("12345"))
+    uints.append(String("1"));    uints.append(String("8765432"))
+    var hexs = List[String]()
+    hexs.append(String("1aFf00")); hexs.append(String("DEADBE"))
+    hexs.append(String("ff"));    hexs.append(String("0123456789abcdef"))
 
     var t0 = perf_counter_ns()
-    var dummy_i = Int64(0)
-    for _ in range(N):
-        var r = parse_int(Input.from_string(s_int))
-        dummy_i = r.get()
+    var acc_i = Int64(0)
+    for i in range(N):
+        var r = parse_int(Input.from_string(ints[i & 3]))
+        acc_i += r.get()
     var int_ns = perf_counter_ns() - t0
-    _ = dummy_i
 
     var t1 = perf_counter_ns()
-    var dummy_u = UInt64(0)
-    for _ in range(N):
-        var r = parse_uint(Input.from_string(s_uint))
-        dummy_u = r.get()
+    var acc_u = UInt64(0)
+    for i in range(N):
+        var r = parse_uint(Input.from_string(uints[i & 3]))
+        acc_u += r.get()
     var uint_ns = perf_counter_ns() - t1
-    _ = dummy_u
 
     var t2 = perf_counter_ns()
-    var dummy_h = String("")
-    for _ in range(N):
-        var r = hex_digits(Input.from_string(s_hex))
-        dummy_h = r.get()
+    var acc_h = Int(0)
+    for i in range(N):
+        var r = hex_digits(Input.from_string(hexs[i & 3]))
+        acc_h += r.get().byte_length()
     var hex_ns = perf_counter_ns() - t2
-    _ = dummy_h
 
     print("parse_int_ns="   + String(int_ns))
     print("parse_uint_ns="  + String(uint_ns))
@@ -54,3 +57,4 @@ def main() raises:
     print("parse_int_per_ns="  + String(Int(int_ns)  // N))
     print("parse_uint_per_ns=" + String(Int(uint_ns) // N))
     print("hex_per_ns="        + String(Int(hex_ns)  // N))
+    _ = acc_i; _ = acc_u; _ = acc_h

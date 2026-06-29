@@ -122,9 +122,7 @@ def smany1[T: Copyable & IC & Movable & ImplicitlyDeletable,
     """One-or-more applications of p.  Fails if zero matches."""
     var r0 = p(ctx)
     if not r0.ok:
-        var out = CtxResult[List[T], S].failure(
-            ctx, "smany1: zero matches at pos " + String(ctx.input.pos)
-        )
+        var out = CtxResult[List[T], S].failure(ctx, "smany1: zero matches")
         return out^
     var results = List[T]()
     results.append(r0.get())
@@ -217,9 +215,7 @@ def ssep_by1[T: Copyable & IC & Movable & ImplicitlyDeletable,
     """One-or-more p separated by sep.  Fails if zero matches."""
     var r0 = p(ctx)
     if not r0.ok:
-        var out = CtxResult[List[T], S].failure(
-            ctx, "ssep_by1: no match at pos " + String(ctx.input.pos)
-        )
+        var out = CtxResult[List[T], S].failure(ctx, "ssep_by1: no match")
         return out^
     var results = List[T]()
     results.append(r0.get())
