@@ -19,7 +19,7 @@ from std.atomic    import Atomic
 from std.algorithm import parallelize
 from std.sys       import num_physical_cores
 from ashcore.queue import SPSCQueue, PopResult
-from ashcore.sync  import TicketLock
+from ashcore.sync  import TicketLock, Semaphore
 from ashcore.debug import DEBUG, dbg_assert, dbg_bounds, dbg_positive
 
 
@@ -511,39 +511,63 @@ struct ReactiveGraph:
         var cap = 1
         while cap < n + n + 4:
             cap = cap + cap
-        var ready  = SPSCQueue(cap)
-        var q_lock = TicketLock()
-        var done   = Atomic[DType.int64](0)
-        var w      = pool.n_workers
+        var ready    = SPSCQueue(cap)
+        var q_lock   = TicketLock()
+        # Semaphore tracks items in the ready queue: one post per push,
+        # one wait per pop, so workers sleep instead of spinning when empty.
+        var work_sem = Semaphore(0)
+        var done     = Atomic[DType.int64](0)
+        var w        = pool.n_workers
 
-        # Seed: push all zero-dep jobs
+        # Seed: push all zero-dep jobs; one semaphore signal per pushed item.
+        var n_seed = 0
         for i in range(n):
             if live_deg[i] == 0:
                 _ = ready.push(UInt64(i))
+                n_seed += 1
+        work_sem.post_many(n_seed)
 
         @parameter
         def worker(tid: Int):
-            while Int(done.load()) < n:
-                # MPMC pop
+            while True:
+                work_sem.wait()          # sleep until an item (or exit token) arrives
+
+                if Int(done.load()) >= n:
+                    return               # all jobs done; termination token consumed
+
                 q_lock.lock()
                 var r = ready.pop()
                 q_lock.unlock()
 
                 if not r.ok:
-                    continue   # empty — another worker is about to push
+                    # Defensive: semaphore count should equal queue depth,
+                    # so this branch is unreachable in correct operation.
+                    work_sem.post()
+                    continue
 
                 var jid = Int(r.value)
                 dispatch(jid)            # ← real work, outside any lock
-                _ = done.fetch_add(1)
+                var new_done = Int(done.fetch_add(1)) + 1
 
-                # Notify dependents: decrement their in-deg; enqueue if ready
+                # Notify dependents: decrement their in-deg; enqueue if ready.
+                var n_pushed = 0
                 q_lock.lock()
                 for idx in range(len(self._deps_of[jid])):
                     var dep = self._deps_of[jid][idx]
                     live_deg[dep] -= 1
                     if live_deg[dep] == 0:
                         _ = ready.push(UInt64(dep))
+                        n_pushed += 1
                 q_lock.unlock()
+
+                if n_pushed > 0:
+                    work_sem.post_many(n_pushed)
+
+                if new_done == n:
+                    # Post one exit token per worker; each sleeping or
+                    # soon-to-sleep worker will consume one and return.
+                    work_sem.post_many(w)
+                    return
 
         parallelize[worker](w, w)
 
