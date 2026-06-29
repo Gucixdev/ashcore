@@ -1,7 +1,10 @@
 """Tests for ashcore.sync and ashcore.jobs — 3 tests per exported function."""
 
 from ashcore.sync  import TicketLock, RWLock, Semaphore, Once
-from ashcore.jobs  import ThreadPool, TaskGraph, ReactiveGraph, parallel_for, parallel_for_range
+from ashcore.threadpool    import ThreadPool
+from ashcore.taskgraph     import TaskGraph
+from ashcore.reactivegraph import ReactiveGraph
+from ashcore.parallel      import parallel_for, parallel_for_range
 from std.algorithm   import parallelize
 from std.atomic      import Atomic
 from std.time        import perf_counter_ns

@@ -1,5 +1,6 @@
 """Stress: DAG re-execute 100× — results must be identical every run."""
-from ashcore.jobs  import ReactiveGraph, ThreadPool
+from ashcore.reactivegraph import ReactiveGraph
+from ashcore.threadpool    import ThreadPool
 from std.atomic      import Atomic
 
 def main() raises:

@@ -6,7 +6,7 @@ Partials are padded to 64 B cache-line slots to avoid false sharing.
 """
 from std.sys  import num_physical_cores
 from std.time import perf_counter_ns
-from ashcore.jobs import parallel_for
+from ashcore.parallel import parallel_for
 
 def main() raises:
     var N = 10_000_000

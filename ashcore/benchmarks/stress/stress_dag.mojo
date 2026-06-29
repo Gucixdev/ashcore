@@ -1,5 +1,6 @@
 """Stress: ReactiveGraph 1000 jobs, 5 layers of 200, fan-out deps."""
-from ashcore.jobs  import ReactiveGraph, ThreadPool
+from ashcore.reactivegraph import ReactiveGraph
+from ashcore.threadpool    import ThreadPool
 from std.atomic      import Atomic
 
 def main() raises:

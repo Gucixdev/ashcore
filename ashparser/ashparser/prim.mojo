@@ -273,6 +273,14 @@ def parse_int(inp: Input) -> ParseResult[Int64]:
 # ── quoted_string ─────────────────────────────────────────────────────────────
 
 @parameter
+def _escape(nxt: UInt8) -> UInt8:
+    if nxt == 110: return 10   # \n
+    if nxt == 116: return 9    # \t
+    if nxt == 114: return 13   # \r
+    return nxt                 # \", \\, or pass-through
+
+
+@parameter
 def quoted_string(inp: Input) -> ParseResult[String]:
     """Parse a double-quoted string with \\\" and \\\\ escapes.
     Returns the content without surrounding quotes."""
@@ -289,19 +297,7 @@ def quoted_string(inp: Input) -> ParseResult[String]:
             var s = String(StringSlice(ptr=buf.unsafe_ptr(), length=len(buf) - 1))
             return ParseResult[String].success(s, inp.at(pos + 1))^
         if b == 92 and pos + 1 < end:  # backslash
-            var nxt = ptr[pos + 1]
-            if nxt == 34:
-                buf.append(34); pos += 2
-            elif nxt == 92:
-                buf.append(92); pos += 2
-            elif nxt == 110:
-                buf.append(10); pos += 2   # \n
-            elif nxt == 116:
-                buf.append(9); pos += 2    # \t
-            elif nxt == 114:
-                buf.append(13); pos += 2   # \r
-            else:
-                buf.append(nxt); pos += 2
+            buf.append(_escape(ptr[pos + 1])); pos += 2
         else:
             buf.append(b); pos += 1
     return ParseResult[String].failure(inp, "quoted_string: unterminated string")^

@@ -5,7 +5,8 @@ null | true | false | number (int/float/scientific) | string | array | object
 Recursive descent — json_value/json_array/json_object call each other.
 Output type is String (re-serialized JSON) — sidesteps recursive value types.
 """
-from ashparser.input  import Input, SourceMap
+from ashparser.input     import Input
+from ashparser.sourcemap import SourceMap
 from ashparser.prim   import tag, ws, quoted_string
 from ashparser.result import ParseResult
 

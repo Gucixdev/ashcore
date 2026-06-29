@@ -7,7 +7,7 @@ ashcore example: 3-stage DAG pipeline using TaskGraph.
 
 TaskGraph handles topological ordering; dispatch(job_id) is called once per job.
 """
-from ashcore.jobs import TaskGraph
+from ashcore.taskgraph import TaskGraph
 
 def main() raises:
     var N = 100_000

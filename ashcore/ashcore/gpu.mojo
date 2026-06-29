@@ -1,20 +1,7 @@
-"""
-AshCore - Parallel execution layer
+"""AshCore — GPU-compatible parallel execution (currently CPU-only).
 
-Currently CPU-only.  The API is forward-compatible with GPU execution: when
-MAX adds stable DeviceContext support for your target hardware, set
-GPU_AVAILABLE = True and replace _cpu_parallel_for with a kernel launch.
-
-Architecture support in MAX 26.4 (for future GPU integration):
-  NVIDIA: sm_52+  (Maxwell and newer)
-  AMD:    gfx90a+ (MI250X, MI300X, Radeon 6900+)
-  Apple:  Metal M1–M4
-  CPU:    always available (parallelize-based fallback, used now)
-
-API:
-    GPU_AVAILABLE: Bool     — compile-time flag; False = CPU path
-    gpu_parallel_for[f](n)  — runs body(i) for i in [0, n) in parallel
-    gpu_info()              — human-readable runtime status string
+GPU_AVAILABLE=False: all work runs via std.algorithm.parallelize.
+Flip to True and implement the GPU branch when DeviceContext is stable.
 """
 
 from std.atomic    import Atomic
@@ -28,14 +15,7 @@ comptime GPU_AVAILABLE: Bool = False
 
 @always_inline
 def gpu_parallel_for[body: def(Int) capturing -> None](n: Int):
-    """
-    Launch body(i) for i in [0, n) in parallel.
-
-    GPU mode (future, GPU_AVAILABLE=True): DeviceContext kernel launch.
-    CPU mode (current): std.algorithm.parallelize with CHUNK=64 batching.
-
-    The GPU_AVAILABLE branch is compile-time — zero overhead in either mode.
-    """
+    """Launch body(i) for i in [0, n).  CPU path now; GPU path when GPU_AVAILABLE=True."""
     if GPU_AVAILABLE:
         dbg_assert(False, "GPU_AVAILABLE=True but GPU launch not implemented yet")
     else:
@@ -44,7 +24,7 @@ def gpu_parallel_for[body: def(Int) capturing -> None](n: Int):
 
 @always_inline
 def _cpu_parallel_for[body: def(Int) capturing -> None](n: Int):
-    """CPU fallback: work-sharing via atomic counter, CHUNK=64."""
+    """Work-sharing via atomic counter, CHUNK=64 tasks per fetch."""
     var W    = num_physical_cores()
     var next = Atomic[DType.int64](0)
     var n_r  = n
@@ -66,7 +46,7 @@ def _cpu_parallel_for[body: def(Int) capturing -> None](n: Int):
 
 
 def gpu_info() -> String:
-    """Return a human-readable execution-mode string."""
+    """Human-readable execution-mode string."""
     if GPU_AVAILABLE:
         return "parallel: GPU (DeviceContext)"
     return "parallel: CPU (std.algorithm.parallelize, CHUNK=64)"

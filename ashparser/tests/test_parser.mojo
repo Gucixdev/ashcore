@@ -4,7 +4,8 @@ ashparser — test suite
 Pattern: chk(label, cond) raises on first failure.
 All parser functions used as combinator arguments must be @parameter def.
 """
-from ashparser.input  import Input, SourceMap, LineCol
+from ashparser.input     import Input
+from ashparser.sourcemap import SourceMap, LineCol
 from ashparser.result import ParseResult
 from ashparser.prim   import (
     satisfy, byte, tag, take_while, take_while1,

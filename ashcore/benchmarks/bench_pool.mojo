@@ -3,7 +3,7 @@ Benchmark: ThreadPool — parallel computation over 1M items.
 Each task computes i*i mod 1e9+7 stored as Int32 — matching C's int[] layout
 so the memory footprint (4MB vs 8MB) is a fair comparison.
 """
-from ashcore.jobs import ThreadPool
+from ashcore.threadpool import ThreadPool
 from std.time import perf_counter_ns
 
 def main() raises:

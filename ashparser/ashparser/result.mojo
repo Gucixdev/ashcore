@@ -4,7 +4,8 @@ ashparser — ParseResult[T]
 Represents the outcome of a parser: either success (value + remaining input)
 or failure (error message + original input for backtracking).
 """
-from ashparser.input import Input, SourceMap
+from ashparser.input     import Input
+from ashparser.sourcemap import SourceMap
 
 
 struct ParseResult[T: Copyable & Movable & ImplicitlyDeletable](

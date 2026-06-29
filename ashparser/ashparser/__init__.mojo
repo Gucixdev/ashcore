@@ -1,4 +1,5 @@
 from ashparser.input     import Input
+from ashparser.sourcemap import SourceMap, LineCol
 from ashparser.result    import ParseResult
 from ashparser.state     import Ctx, CtxResult
 from ashparser.statecomb import (
