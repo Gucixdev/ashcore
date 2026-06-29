@@ -4,7 +4,7 @@ ashparser — ParseResult[T]
 Represents the outcome of a parser: either success (value + remaining input)
 or failure (error message + original input for backtracking).
 """
-from ashparser.input import Input
+from ashparser.input import Input, SourceMap
 
 
 struct ParseResult[T: Copyable & Movable & ImplicitlyDeletable](
@@ -46,11 +46,12 @@ struct ParseResult[T: Copyable & Movable & ImplicitlyDeletable](
         return self._val.value().copy()
 
     def message_ctx(self, original: Input) -> String:
-        """Format 'msg at L:C (byte N)' using line/col from original input."""
+        """Format 'msg at L:C (byte N)' — O(pos) scan.
+        For repeated lookups or large inputs use message_ctx_fast with a SourceMap."""
         var pos = self.rest.pos
         var ptr = original._ptr()
         var line = 1
-        var col = 1
+        var col  = 1
         for i in range(pos):
             if i < original.len and ptr[i] == 10:
                 line += 1
@@ -59,3 +60,10 @@ struct ParseResult[T: Copyable & Movable & ImplicitlyDeletable](
                 col += 1
         return (self.msg + " at " + String(line) + ":" + String(col)
                 + " (byte " + String(pos) + ")")
+
+    def message_ctx_fast(self, sm: SourceMap) -> String:
+        """Format 'msg at L:C (byte N)' using a precomputed SourceMap — O(log n).
+        Build SourceMap once per input buffer and reuse across multiple errors."""
+        var lc = sm.line_col(self.rest.pos)
+        return (self.msg + " at " + String(lc.line) + ":" + String(lc.col)
+                + " (byte " + String(self.rest.pos) + ")")

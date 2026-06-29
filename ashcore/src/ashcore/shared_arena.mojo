@@ -2,8 +2,8 @@
 SharedArena — thread-safe wrapper around Arena.
 
 Kept in a separate module to avoid a circular import:
-  arena.mojo  → ashcore.debug only
-  sync.mojo   → ashcore.debug only
+  arena.mojo        → ashcore.debug only
+  sync.mojo         → ashcore.debug only
   shared_arena.mojo → ashcore.arena + ashcore.sync (no cycle)
 """
 
@@ -12,16 +12,16 @@ from ashcore.arena import Arena, ArenaCheckpoint, CACHE_LINE, REGION_DEFAULT
 from ashcore.sync  import TicketLock
 
 
-struct SharedArena:
+struct SharedArena(Movable):
     """
-    Thread-safe Arena. Wraps Arena with a TicketLock — all operations are
-    serialized. For maximum throughput give each thread its own Arena instead;
+    Thread-safe Arena.  Wraps Arena with a TicketLock — all operations are
+    serialized.  For maximum throughput give each thread its own Arena instead;
     use SharedArena only when multiple threads must allocate from the same pool.
 
     API is identical to Arena.
 
     Example:
-        var a = SharedArena()       # shared across threads
+        var a = SharedArena()
         @parameter
         def worker(tid: Int):
             var p = a.alloc(64)     # safe from any thread
@@ -34,29 +34,43 @@ struct SharedArena:
         self._arena = Arena(region_size)
         self._mu    = TicketLock()
 
-    def alloc(mut self, size: Int, alignment: Int = CACHE_LINE) -> UnsafePointer[UInt8, MutAnyOrigin]:
+    def __moveinit__(out self, owned other: Self):
+        self._arena = other._arena^
+        self._mu    = other._mu^
+
+    def alloc(
+        mut self, size: Int, alignment: Int = CACHE_LINE
+    ) -> UnsafePointer[UInt8, __origin_of(self)]:
         self._mu.lock()
         var p = self._arena.alloc(size, alignment)
         self._mu.unlock()
-        return p
+        return UnsafePointer[UInt8, __origin_of(self)](unsafe_from_address=Int(p))
 
-    def alloc_zeroed(mut self, size: Int, alignment: Int = CACHE_LINE) -> UnsafePointer[UInt8, MutAnyOrigin]:
+    def alloc_zeroed(
+        mut self, size: Int, alignment: Int = CACHE_LINE
+    ) -> UnsafePointer[UInt8, __origin_of(self)]:
         self._mu.lock()
         var p = self._arena.alloc_zeroed(size, alignment)
         self._mu.unlock()
-        return p
+        return UnsafePointer[UInt8, __origin_of(self)](unsafe_from_address=Int(p))
 
-    def alloc_simd[dtype: DType, width: Int](mut self) -> UnsafePointer[UInt8, MutAnyOrigin]:
+    def alloc_simd[dtype: DType, width: Int](
+        mut self,
+    ) -> UnsafePointer[Scalar[dtype], __origin_of(self)]:
         self._mu.lock()
         var p = self._arena.alloc_simd[dtype, width]()
         self._mu.unlock()
-        return p
+        return UnsafePointer[Scalar[dtype], __origin_of(self)](
+            unsafe_from_address=Int(p)
+        )
 
-    def copy_str(mut self, s: String, alignment: Int = 1) -> UnsafePointer[UInt8, MutAnyOrigin]:
+    def copy_str(
+        mut self, s: String, alignment: Int = 1
+    ) -> UnsafePointer[UInt8, __origin_of(self)]:
         self._mu.lock()
         var p = self._arena.copy_str(s, alignment)
         self._mu.unlock()
-        return p
+        return UnsafePointer[UInt8, __origin_of(self)](unsafe_from_address=Int(p))
 
     def checkpoint(mut self) -> ArenaCheckpoint:
         self._mu.lock()

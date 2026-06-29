@@ -1,19 +1,21 @@
 """
 AshCore - Arena Allocator  (Tsoding-style growing arena)
 
-Allocates by advancing a pointer into a region.  When the region is full
-a new one is allocated automatically — no OOM, no raises, no limits.
-Reset is O(1): rewinds all region indices, reuses the memory on the next run.
-free_all() returns every region to the OS.
+Backed by raw OS slabs (malloc/free) — zero metadata overhead, no
+zero-initialization waste, full control over every byte.
 
-Thread-safety: none.  Use one Arena per thread or pair with a Mutex.
+  alloc()    — O(1) bump-pointer, never raises
+  reset()    — O(1) rewind; oversized one-off slabs freed immediately
+  free_all() — returns every slab to the OS
+
+Thread-safety: none.  Use one Arena per thread or pair with SharedArena.
 """
 
 from std.memory import UnsafePointer, memset_zero, memcpy
 from ashcore.debug import DEBUG, dbg_positive, dbg_power_of_two, dbg_assert
 
-comptime CACHE_LINE:    Int = 64               # AVX-512 / cache line
-comptime REGION_DEFAULT: Int = 8 * 1024 * 1024  # 8 MiB per region
+comptime CACHE_LINE:     Int = 64               # AVX-512 / cache-line alignment
+comptime REGION_DEFAULT: Int = 8 * 1024 * 1024  # 8 MiB default slab size
 
 
 @always_inline
@@ -21,8 +23,27 @@ def _align_up(offset: Int, alignment: Int) -> Int:
     return (offset + alignment - 1) & ~(alignment - 1)
 
 
-# Opaque handle returned by checkpoint(); restore() rewinds to it.
-struct ArenaCheckpoint:
+# ── raw slab helpers ──────────────────────────────────────────────────────────
+
+@always_inline
+def _slab_new(n: Int) -> Int:
+    """Allocate n bytes; returns raw address (Int).  Panics on OOM in debug."""
+    var ptr = UnsafePointer[UInt8].alloc(n)
+    if DEBUG:
+        dbg_assert(Int(ptr) != 0, "Arena._slab_new: malloc returned null")
+    return Int(ptr)
+
+@always_inline
+def _slab_del(addr: Int):
+    """Free a slab by raw address."""
+    if addr != 0:
+        UnsafePointer[UInt8](unsafe_from_address=addr).free()
+
+
+# ── ArenaCheckpoint ───────────────────────────────────────────────────────────
+
+struct ArenaCheckpoint(Copyable, ImplicitlyCopyable, Movable, ImplicitlyDeletable):
+    """Opaque position marker returned by Arena.checkpoint()."""
     var region: Int
     var pos:    Int
 
@@ -31,118 +52,138 @@ struct ArenaCheckpoint:
         self.pos    = pos
 
 
-struct Arena:
-    """
-    Growing linear bump allocator.
+# ── Arena ─────────────────────────────────────────────────────────────────────
 
-    API contract (C style — caller is responsible):
-      · alloc(size, alignment) — size > 0, alignment must be power-of-2.
-        Violating these preconditions is undefined behaviour, not an error.
-      · Returned pointers are valid until reset() / restore() rewinds past them,
-        or until free_all() is called.
-      · reset() is O(1) — no memory is freed; it is reused on the next run.
-      · free_all() releases every region; further alloc() re-grows from scratch.
+struct Arena(Movable):
+    """
+    Growing linear bump allocator backed by raw OS slabs.
+
+    Each slab is a single malloc()  with no List metadata or zero-init cost.
+    On overflow the allocator scans for a reusable slab or appends a fresh one.
+
+    reset() is O(1) for normal slabs.  Oversized slabs (created by a single
+    alloc() larger than the default slab size) are freed on reset() to prevent
+    memory bloat across request / frame cycles.
+
+    Returned pointers carry __origin_of(self): the compiler enforces that the
+    Arena outlives any allocation.  reset() / restore() rewind the bump pointer
+    logically — existing pointers become dangling but the type system cannot
+    detect that (inherent arena limitation).
 
     Example:
-        var a = Arena()                     # 8 MiB first region, auto-grows
-        var p = a.alloc(sizeof_mytype)      # bump pointer, no error check needed
-        a.reset()                           # O(1) rewind
+        var a = Arena()
+        var p = a.alloc(sizeof[MyStruct]())   # bump-allocated, never fails
+        a.reset()                              # O(1) rewind, ready for next frame
     """
-    var _regions: List[List[UInt8]]   # list of heap regions; pointers into data
-    var _region:  Int                  # index of the active region
-    var _pos:     Int                  # byte offset inside the active region
-    var _peak:    Int                  # lifetime high-water mark (total bytes)
-    var _rgn_sz:  Int                  # default size for each new region
-
+    var _ptrs:   List[Int]   # raw addresses of malloc'd slabs
+    var _sizes:  List[Int]   # byte capacity of each slab
+    var _region: Int          # index of the active slab
+    var _pos:    Int          # byte offset within the active slab
+    var _peak:   Int          # lifetime high-water mark
+    var _rgn_sz: Int          # target slab size; oversized slabs freed on reset()
 
     def __init__(out self, region_size: Int = REGION_DEFAULT):
-        self._rgn_sz  = region_size if region_size > 0 else REGION_DEFAULT
-        self._region  = 0
-        self._pos     = 0
-        self._peak    = 0
-        self._regions = List[List[UInt8]]()
-        var r = List[UInt8](capacity=self._rgn_sz)
-        r.resize(self._rgn_sz, 0)
-        self._regions.append(r^)
+        self._rgn_sz = region_size if region_size > 0 else REGION_DEFAULT
+        self._region = 0
+        self._pos    = 0
+        self._peak   = 0
+        self._ptrs   = List[Int]()
+        self._sizes  = List[Int]()
+        var addr = _slab_new(self._rgn_sz)
+        self._ptrs.append(addr)
+        self._sizes.append(self._rgn_sz)
 
-    # ── Core allocation ────────────────────────────────────────────────────────
+    def __del__(owned self):
+        for i in range(len(self._ptrs)):
+            _slab_del(self._ptrs[i])
+
+    def __moveinit__(out self, owned other: Self):
+        self._ptrs   = other._ptrs^
+        self._sizes  = other._sizes^
+        self._region = other._region
+        self._pos    = other._pos
+        self._peak   = other._peak
+        self._rgn_sz = other._rgn_sz
+
+    # ── Core allocation ───────────────────────────────────────────────────────
 
     def alloc(
         mut self,
         size:      Int,
         alignment: Int = CACHE_LINE,
-    ) -> UnsafePointer[UInt8, MutAnyOrigin]:
+    ) -> UnsafePointer[UInt8, __origin_of(self)]:
         """
-        Allocate `size` bytes with the given power-of-2 alignment.
-        Never fails: grows into a new region when the current one is full.
-        Precondition: size > 0, alignment is a power-of-2.
-        Debug: aborts on precondition violation.
+        Bump-allocate `size` aligned bytes.  Never raises; grows into a new
+        slab when the current one is full.
+
+        The returned pointer is valid until the Arena is destroyed, or until
+        reset() / restore() rewinds past this allocation.
+
+        Preconditions: size > 0, alignment is a power-of-2.
         """
         dbg_positive(size, "Arena.alloc: size")
         dbg_power_of_two(alignment, "Arena.alloc: alignment")
+
         var aligned = _align_up(self._pos, alignment)
         var end     = aligned + size
 
-        if end > len(self._regions[self._region]):
-            self._grow(aligned + size)   # move to a large-enough region
+        if end > self._sizes[self._region]:
+            self._grow(size)
             aligned = _align_up(0, alignment)
             end     = aligned + size
 
-        var ptr   = self._regions[self._region].unsafe_ptr() + aligned
+        var addr  = self._ptrs[self._region] + aligned
         self._pos = end
 
         var total = self._used_raw()
         if total > self._peak:
             self._peak = total
 
-        return UnsafePointer[UInt8, MutAnyOrigin](ptr)
+        return UnsafePointer[UInt8, __origin_of(self)](unsafe_from_address=addr)
 
     def alloc_zeroed(
         mut self,
         size:      Int,
         alignment: Int = CACHE_LINE,
-    ) -> UnsafePointer[UInt8, MutAnyOrigin]:
-        """alloc() + memset to zero."""
+    ) -> UnsafePointer[UInt8, __origin_of(self)]:
+        """alloc() then zero the bytes."""
         var ptr = self.alloc(size, alignment)
         memset_zero(ptr, size)
         return ptr
 
     def alloc_simd[dtype: DType, width: Int](
         mut self,
-    ) -> UnsafePointer[UInt8, MutAnyOrigin]:
-        """Allocate CACHE_LINE-aligned storage for SIMD[dtype, width]."""
-        comptime if dtype == DType.bool or dtype == DType.uint8 or dtype == DType.int8:
-            return self.alloc(width * 1, CACHE_LINE)
-        elif dtype == DType.float16 or dtype == DType.bfloat16 or dtype == DType.uint16 or dtype == DType.int16:
-            return self.alloc(width * 2, CACHE_LINE)
-        elif dtype == DType.float32 or dtype == DType.uint32 or dtype == DType.int32:
-            return self.alloc(width * 4, CACHE_LINE)
-        else:
-            return self.alloc(width * 8, CACHE_LINE)
+    ) -> UnsafePointer[Scalar[dtype], __origin_of(self)]:
+        """
+        Allocate CACHE_LINE-aligned storage for SIMD[dtype, width].
+        Returns UnsafePointer[Scalar[dtype]] ready for SIMD.load() / .store().
+        """
+        var n_bytes = width * dtype.sizeof()
+        var raw = self.alloc(n_bytes, CACHE_LINE)
+        return UnsafePointer[Scalar[dtype], __origin_of(self)](
+            unsafe_from_address=Int(raw)
+        )
 
     def copy_str(
         mut self,
-        s: String,
+        s:         String,
         alignment: Int = 1,
-    ) -> UnsafePointer[UInt8, MutAnyOrigin]:
-        """Copy string bytes into the arena (null-terminated)."""
+    ) -> UnsafePointer[UInt8, __origin_of(self)]:
+        """Copy string bytes (null-terminated) into the arena."""
         var n   = s.byte_length() + 1
         var dst = self.alloc(n, alignment)
         memcpy(dest=dst, src=s.unsafe_ptr(), count=n - 1)
         (dst + n - 1)[0] = 0
         return dst
 
-    # ── Checkpoint / scoped lifetime ───────────────────────────────────────────
+    # ── Checkpoint / scoped lifetime ──────────────────────────────────────────
 
     def checkpoint(self) -> ArenaCheckpoint:
-        """Save current position. Pair with restore() to free a scope's allocs."""
+        """Save current bump position.  Pair with restore() for scoped allocs."""
         return ArenaCheckpoint(self._region, self._pos)
 
     def restore(mut self, cp: ArenaCheckpoint):
-        """
-        Rewind to a previously saved checkpoint.
-        No-op if cp points past the current position.
-        """
+        """Rewind to a previously saved checkpoint."""
         if cp.region > self._region:
             return
         if cp.region == self._region and cp.pos >= self._pos:
@@ -150,79 +191,100 @@ struct Arena:
         self._region = cp.region
         self._pos    = cp.pos
 
-    # ── Lifetime ───────────────────────────────────────────────────────────────
+    # ── Lifetime ──────────────────────────────────────────────────────────────
 
     def reset(mut self):
-        """O(1) rewind to the start. Memory is kept and reused on next allocs."""
+        """
+        O(1) rewind.  Normal-sized slabs are kept for reuse on the next run.
+        Oversized slabs (from large one-off allocs) are freed to prevent
+        memory bloat across request / frame cycles.
+        """
+        # _grow() always appends oversized slabs at the end of the list.
+        while len(self._ptrs) > 1:
+            var last = len(self._ptrs) - 1
+            if self._sizes[last] > self._rgn_sz:
+                _slab_del(self._ptrs.pop())
+                _ = self._sizes.pop()
+            else:
+                break
         self._region = 0
         self._pos    = 0
 
     def reset_zeroed(mut self):
         """Rewind and zero previously used bytes (prevents data leakage)."""
         for i in range(self._region):
-            memset_zero(self._regions[i].unsafe_ptr(), len(self._regions[i]))
-        memset_zero(self._regions[self._region].unsafe_ptr(), self._pos)
-        self._region = 0
-        self._pos    = 0
+            memset_zero(
+                UnsafePointer[UInt8](unsafe_from_address=self._ptrs[i]),
+                self._sizes[i],
+            )
+        memset_zero(
+            UnsafePointer[UInt8](unsafe_from_address=self._ptrs[self._region]),
+            self._pos,
+        )
+        self.reset()
 
     def free_all(mut self):
-        """Release all regions to the OS.  Arena is empty but still usable."""
-        self._regions = List[List[UInt8]]()
-        self._region  = 0
-        self._pos     = 0
-        var r = List[UInt8](capacity=self._rgn_sz)
-        r.resize(self._rgn_sz, 0)
-        self._regions.append(r^)
+        """Release all slabs to the OS.  Arena is empty but still usable."""
+        for i in range(len(self._ptrs)):
+            _slab_del(self._ptrs[i])
+        self._ptrs   = List[Int]()
+        self._sizes  = List[Int]()
+        self._region = 0
+        self._pos    = 0
+        var addr = _slab_new(self._rgn_sz)
+        self._ptrs.append(addr)
+        self._sizes.append(self._rgn_sz)
 
-    # ── Introspection ──────────────────────────────────────────────────────────
+    # ── Introspection ─────────────────────────────────────────────────────────
 
     def used(self) -> Int:
-        """Total bytes currently allocated (O(n_regions))."""
+        """Total bytes currently bump-allocated (O(n_slabs))."""
         return self._used_raw()
 
     def peak_usage(self) -> Int:
         return self._peak
 
     def n_regions(self) -> Int:
-        return len(self._regions)
+        return len(self._ptrs)
 
     def capacity(self) -> Int:
-        """Total bytes across all regions."""
+        """Total bytes across all slabs."""
         var total = 0
-        for i in range(len(self._regions)):
-            total += len(self._regions[i])
+        for i in range(len(self._sizes)):
+            total += self._sizes[i]
         return total
 
     def dump(self) -> String:
         return (
-            "Arena(regions=" + String(len(self._regions))
-            + ", used=" + String(self._used_raw())
-            + ", peak=" + String(self._peak)
-            + ", rgn_sz=" + String(self._rgn_sz) + ")"
+            "Arena(slabs=" + String(len(self._ptrs))
+            + ", used="    + String(self._used_raw())
+            + ", peak="    + String(self._peak)
+            + ", slab_sz=" + String(self._rgn_sz) + ")"
         )
 
-    # ── Internal ───────────────────────────────────────────────────────────────
+    # ── Internal ──────────────────────────────────────────────────────────────
 
     def _used_raw(self) -> Int:
         var total = 0
         for i in range(self._region):
-            total += len(self._regions[i])
+            total += self._sizes[i]
         return total + self._pos
 
     def _grow(mut self, min_size: Int):
-        """Move to the next usable region, allocating a new one if needed."""
-        # Scan forward for an existing region that is large enough to reuse.
+        """Advance to the next slab large enough for min_size bytes."""
         var next = self._region + 1
-        while next < len(self._regions):
-            if len(self._regions[next]) >= min_size:
+        while next < len(self._ptrs):
+            if self._sizes[next] >= min_size:
                 self._region = next
                 self._pos    = 0
                 return
             next += 1
-        # No suitable region found — allocate a fresh one.
-        var sz = self._rgn_sz if self._rgn_sz >= min_size else min_size
-        var r  = List[UInt8](capacity=sz)
-        r.resize(sz, 0)
-        self._regions.append(r^)
-        self._region = len(self._regions) - 1
+        # No suitable slab — allocate a fresh one.
+        # If min_size > _rgn_sz the slab is "oversized" and will be freed on
+        # the next reset() call to prevent long-lived memory bloat.
+        var sz   = self._rgn_sz if self._rgn_sz >= min_size else min_size
+        var addr = _slab_new(sz)
+        self._ptrs.append(addr)
+        self._sizes.append(sz)
+        self._region = len(self._ptrs) - 1
         self._pos    = 0

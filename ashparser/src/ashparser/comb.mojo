@@ -99,6 +99,30 @@ def map[T: Copyable & Movable & ImplicitlyDeletable,
     return out^
 
 
+# ── attempt ──────────────────────────────────────────────────────────────────
+
+@parameter
+def attempt[T: Copyable & Movable & ImplicitlyDeletable,
+            p: def(Input) capturing -> ParseResult[T]](inp: Input) -> ParseResult[T]:
+    """
+    Run p; on failure reset input to `inp` regardless of how much p consumed.
+
+    Most built-in parsers (tag, byte, seq, …) already reset on failure, so
+    attempt is mainly needed when composing user-written parsers that may
+    partially consume input before failing, or when using attempt as an
+    explicit annotation of "this must not consume on failure".
+
+    Example — try a 2-byte token, backtrack on failure:
+        var r = attempt[String, my_two_byte_parser](inp)
+    """
+    var r = p(inp)
+    if not r.ok:
+        # Overwrite rest with original position — guarantees no consumption.
+        var out = ParseResult[T].failure(inp, r.msg)
+        return out^
+    return r^
+
+
 # ── choice ───────────────────────────────────────────────────────────────────
 
 @parameter
