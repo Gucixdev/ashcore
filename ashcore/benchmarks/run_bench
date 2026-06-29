@@ -1,0 +1,328 @@
+#!/usr/bin/env bash
+# AshCore benchmark suite — compares Mojo vs C vs Python
+# Usage: ./benchmarks/run_bench [arena|pool|sync|all]
+
+set -euo pipefail
+PROJ_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+BENCH_DIR="$PROJ_DIR/benchmarks"
+export PATH="$HOME/.local/bin:$PATH"
+
+# ── terminal colors ────────────────────────────────────────────────────────────
+BOLD='\033[1m'; DIM='\033[2m'
+GREEN='\033[0;32m'; CYAN='\033[0;36m'; YELLOW='\033[1;33m'
+MAGENTA='\033[0;35m'; RED='\033[0;31m'; NC='\033[0m'
+
+hdr()   { printf "\n${BOLD}${CYAN}▶  %s${NC}\n" "$*"; }
+label() { printf "  ${BOLD}%-28s${NC}" "$1"; }
+ok()    { printf "  ${GREEN}✓${NC} %-26s" "$1"; }
+warn()  { printf "  ${YELLOW}✗${NC} %-26s ${DIM}(skipped: %s)${NC}\n" "$1" "$2"; }
+sep()   { printf "  ${DIM}%s${NC}\n" "────────────────────────────────────────────────────────────────"; }
+
+# ── helpers ────────────────────────────────────────────────────────────────────
+ns_to_ms() { printf "%.1f ms" "$(echo "scale=1; $1 / 1000000" | bc)"; }
+ns_to_us() { printf "%.0f ns" "$1"; }
+
+# Run a Mojo benchmark file, return stdout
+mojo_run() {
+    (cd "$PROJ_DIR" && magic run mojo run -I src "$BENCH_DIR/$1") 2>/dev/null
+}
+
+# Extract key=value from output
+kv() { echo "$1" | grep -E "^$2=" | cut -d= -f2; }
+
+# Compile and run a C file
+c_run() {
+    local src="$BENCH_DIR/$1"
+    local bin="/tmp/_ashen_$(basename "$1" .c)"
+    gcc -O2 -static-libgcc -o "$bin" "$src" -lpthread 2>/dev/null || { echo "BUILD_FAILED"; return; }
+    "$bin"
+}
+
+# Run Python
+py_run() { python3 "$BENCH_DIR/$1" 2>/dev/null; }
+
+# Build Mojo binary and count SIMD registers + atomic instructions in disassembly
+asm_probe() {
+    local mj_src=$1
+    local bin; bin=$(mktemp /tmp/_ashen_asm_XXXXXX)
+    (cd "$PROJ_DIR" && magic run mojo build -I src "$BENCH_DIR/$mj_src" -o "$bin") 2>/dev/null \
+        || { rm -f "$bin"; return; }
+    local asm; asm=$(objdump -d "$bin" 2>/dev/null)
+    local ymm; ymm=$(echo "$asm" | grep -c "[Yy][Mm][Mm]" || true)
+    local zmm; zmm=$(echo "$asm" | grep -c "[Zz][Mm][Mm]" || true)
+    local lock_ops; lock_ops=$(echo "$asm" | grep -c "lock " || true)
+    ymm=$(echo "$ymm" | tr -d '[:space:]')
+    zmm=$(echo "$zmm" | tr -d '[:space:]')
+    lock_ops=$(echo "$lock_ops" | tr -d '[:space:]')
+    printf "  ${DIM}ASM: %s YMM + %s ZMM SIMD  |  %s lock-prefixed atomics${NC}\n" \
+        "${ymm:-0}" "${zmm:-0}" "${lock_ops:-0}"
+    # perf stat if available
+    if command -v perf >/dev/null 2>&1; then
+        local pout; pout=$(perf stat -e instructions,cycles,cache-misses \
+            --repeat=3 -- "$bin" 2>&1 | grep -E "insn.cycle|cache-misses" || true)
+        local ipc; ipc=$(echo "$pout" | grep -oE "[0-9]+\.[0-9]+ insn.cycle" | head -1)
+        local miss; miss=$(echo "$pout" | grep "cache-misses" | awk '{print $1}' | head -1)
+        [ -n "$ipc"  ] && printf "  ${DIM}perf: IPC=%s${NC}\n" "$ipc"
+        [ -n "$miss" ] && printf "  ${DIM}perf: cache-misses=%s${NC}\n" "$miss"
+    fi
+    rm -f "$bin"
+}
+
+# Speedup ratio: how many times faster is A vs B
+speedup() {
+    local a=$1 b=$2
+    [ "$a" -gt 0 ] && [ "$b" -gt 0 ] || { echo "n/a"; return; }
+    printf "%.1fx" "$(echo "scale=1; $b / $a" | bc)"
+}
+
+# ── BENCHMARK 1: Arena allocator ───────────────────────────────────────────────
+bench_arena() {
+    hdr "BENCHMARK 1 — Memory Allocation  (1M × 64B allocs)"
+    printf "\n  ${DIM}%-28s  %12s  %10s  %10s${NC}\n" \
+        "implementation" "total (alloc)" "per-alloc" "free/reset"
+    sep
+
+    # Mojo Arena
+    local mo
+    mo=$(mojo_run bench_arena.mojo)
+    local mo_total mo_reset mo_per
+    mo_total=$(kv "$mo" alloc_total_ns)
+    mo_reset=$(kv "$mo" reset_ns)
+    mo_per=$(kv "$mo" per_op_ns)
+    printf "  ${GREEN}Mojo AshCore Arena${NC}       %12s  %10s  %10s\n" \
+        "$(ns_to_ms "$mo_total")" "${mo_per} ns" "$(ns_to_us "$mo_reset")"
+
+    # C malloc
+    local cm
+    cm=$(c_run bench_arena.c)
+    if [ "$cm" = "BUILD_FAILED" ]; then
+        warn "C malloc/free" "gcc failed"
+    else
+        local cm_total cm_free cm_per
+        cm_total=$(kv "$cm" alloc_total_ns)
+        cm_free=$(kv  "$cm" free_ns)
+        cm_per=$(kv   "$cm" per_op_ns)
+        local sp_alloc; sp_alloc=$(speedup "$mo_total" "$cm_total")
+        local sp_reset; sp_reset=$(speedup "$mo_reset" "$cm_free")
+        printf "  ${MAGENTA}C    malloc/free${NC}            %12s  %10s  %10s  ${DIM}(arena %s faster alloc, %s faster free)${NC}\n" \
+            "$(ns_to_ms "$cm_total")" "${cm_per} ns" "$(ns_to_ms "$cm_free")" \
+            "$sp_alloc" "$sp_reset"
+    fi
+
+    # Python bytearray
+    local py
+    py=$(py_run bench_arena.py)
+    local py_total py_free py_per
+    py_total=$(kv "$py" alloc_total_ns)
+    py_free=$(kv  "$py" free_ns)
+    py_per=$(kv   "$py" per_op_ns)
+    local sp_py; sp_py=$(speedup "$mo_total" "$py_total")
+    printf "  ${YELLOW}Python bytearray list${NC}      %12s  %10s  %10s  ${DIM}(arena %s faster alloc)${NC}\n" \
+        "$(ns_to_ms "$py_total")" "${py_per} ns" "$(ns_to_ms "$py_free")" \
+        "$sp_py"
+
+    asm_probe bench_arena.mojo
+}
+
+# ── BENCHMARK 2: Parallel computation ─────────────────────────────────────────
+bench_pool() {
+    hdr "BENCHMARK 2 — Parallel Computation  (1M tasks: i²  mod 1e9+7)"
+    printf "\n  ${DIM}%-28s  %12s  %8s  %s${NC}\n" \
+        "implementation" "wall time" "workers" "notes"
+    sep
+
+    # Mojo ThreadPool
+    local mo
+    mo=$(mojo_run bench_pool.mojo)
+    local mo_ns mo_w mo_chk
+    mo_ns=$(kv "$mo" pool_ns)
+    mo_w=$(kv  "$mo" workers)
+    mo_chk=$(kv "$mo" checksum)
+    printf "  ${GREEN}Mojo AshCore ThreadPool${NC}  %12s  %8s  checksum=%s\n" \
+        "$(ns_to_ms "$mo_ns")" "$mo_w" "$mo_chk"
+
+    # C pthreads
+    local cm
+    cm=$(c_run bench_pool.c)
+    if [ "$cm" = "BUILD_FAILED" ]; then
+        warn "C pthreads" "gcc failed"
+    else
+        local cm_ns cm_w cm_chk
+        cm_ns=$(kv "$cm" pool_ns)
+        cm_w=$(kv  "$cm" workers)
+        cm_chk=$(kv "$cm" checksum)
+        local sp; sp=$(speedup "$mo_ns" "$cm_ns")
+        local dir="faster"
+        if (( cm_ns < mo_ns )); then sp=$(speedup "$cm_ns" "$mo_ns"); dir="slower"; fi
+        printf "  ${MAGENTA}C    pthreads${NC}               %12s  %8s  checksum=%s  ${DIM}(Mojo %s %s)${NC}\n" \
+            "$(ns_to_ms "$cm_ns")" "$cm_w" "$cm_chk" "$sp" "$dir"
+    fi
+
+    # Python multiprocessing
+    local py
+    py=$(py_run bench_pool.py)
+    local mp_ns mp_w mp_chk th_ns th_chk
+    mp_ns=$(kv "$py" mp_pool_ns)
+    mp_w=$(kv  "$py" mp_workers)
+    mp_chk=$(kv "$py" mp_checksum)
+    th_ns=$(kv  "$py" th_pool_ns)
+    th_chk=$(kv "$py" th_checksum)
+
+    local sp_mp; sp_mp=$(speedup "$mo_ns" "$mp_ns")
+    printf "  ${YELLOW}Python multiprocessing.Pool${NC} %12s  %8s  checksum=%s  ${DIM}(Mojo %s faster, includes process spawn)${NC}\n" \
+        "$(ns_to_ms "$mp_ns")" "$mp_w" "$mp_chk" "$sp_mp"
+    local sp_th; sp_th=$(speedup "$mo_ns" "$th_ns")
+    printf "  ${YELLOW}Python ThreadPoolExecutor${NC}  %12s  %8s  checksum=%s  ${DIM}(Mojo %s faster, GIL limits CPU parallelism)${NC}\n" \
+        "$(ns_to_ms "$th_ns")" "$mp_w" "$th_chk" "$sp_th"
+
+    asm_probe bench_pool.mojo
+}
+
+# ── BENCHMARK 3: Lock throughput ───────────────────────────────────────────────
+bench_sync() {
+    hdr "BENCHMARK 3a — Lock Contention WORST CASE  (8 threads × 100k, 0ns critical section)"
+    printf "\n  ${DIM}%-28s  %12s  %10s  %s${NC}\n" \
+        "implementation" "wall time" "per-op" "notes"
+    sep
+
+    local mo; mo=$(mojo_run bench_sync.mojo)
+    local mo_ns mo_per mo_cnt
+    mo_ns=$(kv  "$mo" lock_ns)
+    mo_per=$(kv "$mo" per_op_ns)
+    mo_cnt=$(kv "$mo" counter)
+    printf "  ${GREEN}Mojo AshCore TicketLock${NC}  %12s  %10s  counter=%s (spinlock+PAUSE+yield)\n" \
+        "$(ns_to_ms "$mo_ns")" "${mo_per} ns" "$mo_cnt"
+
+    local cm; cm=$(c_run bench_sync.c)
+    if [ "$cm" = "BUILD_FAILED" ]; then
+        warn "C pthread_mutex" "gcc failed"
+    else
+        local cm_ns cm_per cm_cnt
+        cm_ns=$(kv  "$cm" lock_ns)
+        cm_per=$(kv "$cm" per_op_ns)
+        cm_cnt=$(kv "$cm" counter)
+        local dir sp
+        if (( mo_ns < cm_ns )); then sp=$(speedup "$mo_ns" "$cm_ns"); dir="faster"
+        else sp=$(speedup "$cm_ns" "$mo_ns"); dir="slower"; fi
+        printf "  ${MAGENTA}C    pthread_mutex${NC}          %12s  %10s  counter=%s  ${DIM}(Mojo %s %s; futex sleeps waiters)${NC}\n" \
+            "$(ns_to_ms "$cm_ns")" "${cm_per} ns" "$cm_cnt" "$sp" "$dir"
+    fi
+
+    local py; py=$(py_run bench_sync.py)
+    local py_ns py_per py_cnt
+    py_ns=$(kv  "$py" lock_ns)
+    py_per=$(kv "$py" per_op_ns)
+    py_cnt=$(kv "$py" counter)
+    local sp_py; sp_py=$(speedup "$mo_ns" "$py_ns")
+    printf "  ${YELLOW}Python threading.Lock${NC}      %12s  %10s  counter=%s  ${DIM}(Mojo %s faster)${NC}\n" \
+        "$(ns_to_ms "$py_ns")" "${py_per} ns" "$py_cnt" "$sp_py"
+
+    asm_probe bench_sync.mojo
+
+    hdr "BENCHMARK 3b — Lock Contention REALISTIC  (4 threads × 50k, ~50ns critical section)"
+    printf "\n  ${DIM}%-28s  %12s  %10s  %s${NC}\n" \
+        "implementation" "wall time" "per-op" "notes"
+    sep
+
+    local mr; mr=$(mojo_run bench_sync_realistic.mojo)
+    local mr_ns mr_per mr_cnt mr_ok
+    mr_ns=$(kv  "$mr" lock_ns)
+    mr_per=$(kv "$mr" per_op_ns)
+    mr_cnt=$(kv "$mr" counter)
+    mr_ok=$(kv  "$mr" correct)
+    printf "  ${GREEN}Mojo AshCore TicketLock${NC}  %12s  %10s  counter=%s correct=%s\n" \
+        "$(ns_to_ms "$mr_ns")" "${mr_per} ns" "$mr_cnt" "$mr_ok"
+
+    local cr; cr=$(c_run bench_sync_realistic.c)
+    if [ "$cr" = "BUILD_FAILED" ]; then
+        warn "C pthread_mutex realistic" "gcc failed"
+    else
+        local cr_ns cr_per cr_ok
+        cr_ns=$(kv  "$cr" lock_ns)
+        cr_per=$(kv "$cr" per_op_ns)
+        cr_ok=$(kv  "$cr" correct)
+        local dir2 sp2
+        if (( mr_ns < cr_ns )); then sp2=$(speedup "$mr_ns" "$cr_ns"); dir2="faster"
+        else sp2=$(speedup "$cr_ns" "$mr_ns"); dir2="slower"; fi
+        printf "  ${MAGENTA}C    pthread_mutex${NC}          %12s  %10s  correct=%s  ${DIM}(Mojo %s %s)${NC}\n" \
+            "$(ns_to_ms "$cr_ns")" "${cr_per} ns" "$cr_ok" "$sp2" "$dir2"
+    fi
+
+}
+
+# ── BENCHMARK 4: Parallel Reduction ───────────────────────────────────────────
+bench_reduce() {
+    hdr "BENCHMARK 4 — Parallel Reduction  (1M Int64 sum)"
+    printf "\n  ${DIM}%-28s  %12s  %10s  %s${NC}\n" \
+        "implementation" "wall time" "per-elem" "notes"
+    sep
+
+    # Mojo
+    local mo
+    mo=$(mojo_run bench_reduce.mojo)
+    local mo_ns mo_ps mo_w mo_ok
+    mo_ns=$(kv "$mo" reduce_ns)
+    mo_ps=$(kv "$mo" per_elem_ps)
+    mo_w=$(kv  "$mo" workers)
+    mo_ok=$(kv "$mo" correct)
+    printf "  ${GREEN}Mojo parallel reduce${NC}       %12s  %10s  workers=%s  correct=%s\n" \
+        "$(ns_to_ms "$mo_ns")" "${mo_ps} ps/elem" "$mo_w" "$mo_ok"
+
+    # C pthreads + CHUNK
+    local cm
+    cm=$(c_run bench_reduce.c)
+    if [ "$cm" = "BUILD_FAILED" ]; then
+        warn "C pthreads reduce" "gcc failed"
+    else
+        local cm_ns cm_ps cm_ok
+        cm_ns=$(kv "$cm" reduce_ns)
+        cm_ps=$(kv "$cm" per_elem_ps)
+        cm_ok=$(kv "$cm" correct)
+        local sp dir
+        if (( mo_ns < cm_ns )); then sp=$(speedup "$mo_ns" "$cm_ns"); dir="faster"
+        else sp=$(speedup "$cm_ns" "$mo_ns"); dir="slower"; fi
+        printf "  ${MAGENTA}C    pthreads reduce${NC}        %12s  %10s  correct=%s  ${DIM}(Mojo %s %s)${NC}\n" \
+            "$(ns_to_ms "$cm_ns")" "${cm_ps} ps/elem" "$cm_ok" "$sp" "$dir"
+    fi
+
+    local mofp
+    mofp=$(mojo_run bench_reduce_fp.mojo)
+    local f32_ns; f32_ns=$(kv "$mofp" reduce_f32_ns)
+    local bf16_ns; bf16_ns=$(kv "$mofp" reduce_bf16_ns)
+    local gpu_ns;  gpu_ns=$(kv  "$mofp" reduce_gpu_ns)
+    printf "  ${GREEN}Mojo float32 reduce${NC}        %12s             workers=%s\n" \
+        "$(ns_to_ms "$f32_ns")" "$mo_w"
+    printf "  ${GREEN}Mojo bfloat16 reduce${NC}       %12s             workers=%s  ${DIM}(bf16→f32 widen)${NC}\n" \
+        "$(ns_to_ms "$bf16_ns")" "$mo_w"
+    if [ "${gpu_ns:-1}" != "-1" ] && [ -n "${gpu_ns}" ]; then
+        printf "  ${CYAN}Mojo GPU reduce (f32)${NC}      %12s\n" "$(ns_to_ms "$gpu_ns")"
+    fi
+    asm_probe bench_reduce.mojo
+}
+
+# ── MAIN ───────────────────────────────────────────────────────────────────────
+MODE="${1:-all}"
+
+printf "\n${BOLD}${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
+printf "\n${BOLD}${CYAN}║           AshCore  —  Performance vs C vs Python           ║${NC}"
+printf "\n${BOLD}${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}\n"
+printf "  ${DIM}Platform: $(uname -sm)   $(python3 --version 2>&1)   gcc $(gcc --version | head -1 | grep -oP '\d+\.\d+\.\d+' | head -1)${NC}\n"
+
+case "$MODE" in
+    arena)  bench_arena  ;;
+    pool)   bench_pool   ;;
+    sync)   bench_sync   ;;
+    reduce) bench_reduce ;;
+    all)
+        bench_arena
+        bench_pool
+        bench_sync
+        bench_reduce
+        ;;
+    *)
+        echo "Usage: $0 [all|arena|pool|sync|reduce]"
+        exit 1
+        ;;
+esac
+
+printf "\n"

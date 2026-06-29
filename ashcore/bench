@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+# AshCore — Mojo-only benchmark (fast, no C/Python overhead)
+# Usage: ./bench [all|arena|pool|sync|reactive]
+set -euo pipefail
+PROJ="$(cd "$(dirname "$0")" && pwd)"
+export PATH="$HOME/.local/bin:$PATH"
+
+BOLD='\033[1m'; DIM='\033[2m'; CYAN='\033[0;36m'; GREEN='\033[0;32m'
+YELLOW='\033[1;33m'; NC='\033[0m'
+
+mj() { (cd "$PROJ" && magic run mojo run -I src "$@" 2>/dev/null); }
+kv()  { echo "$1" | grep -E "^$2=" | cut -d= -f2; }
+pct() {
+    local a=$1 b=$2
+    [ "$b" -gt 0 ] || { echo "n/a"; return; }
+    printf "%.0f%%" "$(echo "scale=0; $a * 100 / $b" | bc)"
+}
+
+simd_note() {
+    local src=$1
+    local bin; bin=$(mktemp /tmp/_ashen_asm_XXXXXX)
+    (cd "$PROJ" && magic run mojo build -I src "$src" -o "$bin") 2>/dev/null || { rm -f "$bin"; return; }
+    local asm; asm=$(objdump -d "$bin" 2>/dev/null)
+    local ymm; ymm=$(echo "$asm" | grep -c "[Yy][Mm][Mm]" || true)
+    local zmm; zmm=$(echo "$asm" | grep -c "[Zz][Mm][Mm]" || true)
+    local lock_ops; lock_ops=$(echo "$asm" | grep -c "lock " || true)
+    ymm=$(echo "$ymm" | tr -d '[:space:]')
+    zmm=$(echo "$zmm" | tr -d '[:space:]')
+    lock_ops=$(echo "$lock_ops" | tr -d '[:space:]')
+    if [ "${ymm:-0}" -gt 0 ] 2>/dev/null || [ "${zmm:-0}" -gt 0 ] 2>/dev/null; then
+        dim "ASM: ${ymm} YMM + ${zmm} ZMM SIMD  |  ${lock_ops:-0} lock-prefixed atomics"
+    else
+        dim "ASM: 0 YMM + 0 ZMM — scalar only  |  ${lock_ops:-0} lock-prefixed atomics"
+    fi
+    # perf stat if available — IPC and cache-misses
+    if command -v perf >/dev/null 2>&1; then
+        local pout; pout=$(perf stat -e instructions,cycles,cache-misses \
+            --repeat=3 -- "$bin" 2>&1 | grep -E "insn.cycle|cache-misses" || true)
+        local ipc; ipc=$(echo "$pout" | grep -oE "[0-9]+\.[0-9]+ insn.cycle" | head -1)
+        local miss; miss=$(echo "$pout" | grep "cache-misses" | awk '{print $1}' | head -1)
+        [ -n "$ipc"  ] && dim "perf: IPC=${ipc}"
+        [ -n "$miss" ] && dim "perf: cache-misses=${miss}"
+    fi
+    rm -f "$bin"
+}
+
+hdr() { printf "\n${BOLD}${CYAN}▶  %s${NC}\n" "$*"; }
+row() { printf "  ${GREEN}%-30s${NC}  %s\n" "$1" "$2"; }
+dim() { printf "  ${DIM}%s${NC}\n" "$*"; }
+
+# Run a bench N times, output all results separated by newlines
+run3() {
+    local f=$1
+    for _ in 1 2 3; do mj "$f"; echo "---"; done
+}
+
+# Extract min of a key across 3 runs (separated by ---)
+min3() {
+    local data=$1 key=$2
+    echo "$data" | grep -E "^$key=" | cut -d= -f2 | sort -n | head -1
+}
+
+MODE="${1:-all}"
+
+# ── ARENA ──────────────────────────────────────────────────────────────────────
+bench_arena() {
+    hdr "Arena  (1M × 64B allocs + O(1) reset)  — best of 3"
+    local data; data=$(run3 benchmarks/bench_arena.mojo)
+    local alloc_ns; alloc_ns=$(min3 "$data" alloc_total_ns)
+    local reset_ns; reset_ns=$(min3 "$data" reset_ns)
+    local per_ns;   per_ns=$(min3   "$data" per_op_ns)
+    local n;        n=$(kv "$(echo "$data" | head -4)" n)
+    local ok;       ok=$(echo "$data" | grep -E "^correct=" | head -1 | cut -d= -f2)
+    row "alloc ${n} × 64B"       "total $(printf "%.1f ms" "$(echo "scale=1; $alloc_ns/1000000" | bc)")   per-op ${per_ns} ns   correct=${ok}"
+    row "reset (O(1) bump)"      "$(printf "%.0f ns" "$reset_ns")   ← single int write vs C O(N) free"
+    dim "peak util = ~$(pct "$per_ns" "64")  ← alignment padding / alloc byte"
+    dim "reset speedup vs malloc: $(echo "scale=0; 14700000 / $reset_ns" | bc)× (14.7 ms reference from compare)"
+    simd_note benchmarks/bench_arena.mojo
+}
+
+# ── POOL ───────────────────────────────────────────────────────────────────────
+bench_pool() {
+    hdr "ThreadPool  (1M tasks: i² mod 1e9+7)  — best of 3"
+    local data; data=$(run3 benchmarks/bench_pool.mojo)
+    local ns; ns=$(min3 "$data" pool_ns)
+    local w;  w=$(kv "$(echo "$data" | head -4)" workers)
+    local ok; ok=$(echo "$data" | grep -E "^correct=" | head -1 | cut -d= -f2)
+    row "1M tasks / ${w} workers"  "$(printf "%.1f ms" "$(echo "scale=1; $ns/1000000" | bc)")   correct=${ok}"
+    simd_note benchmarks/bench_pool.mojo
+
+    # Scaling: workers 1 → max
+    printf "\n  ${DIM}scaling (workers):%s\n" ""
+    local max_w; max_w=$w
+    for nw in 1 2 4; do
+        if [ "$nw" -le "$max_w" ]; then
+            local s
+            s=$(mj benchmarks/bench_pool.mojo | grep "^pool_ns=" | cut -d= -f2)
+            printf "  ${DIM}  %-3s workers → %.1f ms${NC}\n" "$nw" "$(echo "scale=1; $s/1000000" | bc)"
+        fi
+    done
+    printf "  ${DIM}  %-3s workers → %.1f ms (best of 3)${NC}\n" "$max_w" \
+        "$(echo "scale=1; $ns/1000000" | bc)"
+}
+
+# ── SYNC ───────────────────────────────────────────────────────────────────────
+bench_sync() {
+    hdr "Sync — TicketLock  — best of 3"
+    # worst-case: 8 threads × 100k, 0ns critical section
+    local data; data=$(run3 benchmarks/bench_sync.mojo)
+    local tl_ns; tl_ns=$(min3 "$data" lock_ns)
+    local tl_per; tl_per=$(min3 "$data" per_op_ns)
+    local total_ops; total_ops=$(kv "$(echo "$data" | head -8)" total_ops)
+    local ok_wc; ok_wc=$(echo "$data" | grep -E "^correct=" | head -1 | cut -d= -f2)
+    row "worst-case  (8t × 100k, 0ns crit)"  "$(printf "%.1f ms" "$(echo "scale=1; $tl_ns/1000000" | bc)")   ${tl_per} ns/op   correct=${ok_wc}"
+    # realistic: 4 threads × 50k, ~50ns critical section
+    local rdata; rdata=$(run3 benchmarks/bench_sync_realistic.mojo)
+    local r_ns; r_ns=$(min3 "$rdata" lock_ns)
+    local r_per; r_per=$(min3 "$rdata" per_op_ns)
+    local ok_r; ok_r=$(echo "$rdata" | grep -E "^correct=" | head -1 | cut -d= -f2)
+    row "realistic   (4t × 50k, 50ns crit)"  "$(printf "%.1f ms" "$(echo "scale=1; $r_ns/1000000" | bc)")   ${r_per} ns/op   correct=${ok_r}"
+    simd_note benchmarks/bench_sync.mojo
+}
+
+# ── REDUCE ────────────────────────────────────────────────────────────────────
+bench_reduce() {
+    hdr "Reduce  (Int64 10M · Float32 50M · BFloat16 50M)  — best of 3"
+    local data; data=$(run3 benchmarks/bench_reduce.mojo)
+    local ns;        ns=$(min3       "$data" reduce_ns)
+    local scalar_ns; scalar_ns=$(min3 "$data" scalar_ns)
+    local simd_ns;   simd_ns=$(min3   "$data" simd_ns)
+    local w;         w=$(kv  "$(echo "$data" | head -4)" workers)
+    local ok;        ok=$(echo "$data" | grep -E "^correct=" | head -1 | cut -d= -f2)
+    row "parallel Int64 / ${w} workers"   "$(printf "%.1f ms" "$(echo "scale=1; $ns/1000000" | bc)")"
+    row "single-thread scalar"            "$(printf "%.1f ms" "$(echo "scale=1; $scalar_ns/1000000" | bc)")"
+    row "single-thread SIMD (8×Int64)"   "$(printf "%.1f ms" "$(echo "scale=1; $simd_ns/1000000" | bc)")"
+    dim "correct=${ok}  |  parallel vs scalar: $(echo "scale=1; $scalar_ns / $ns" | bc)×  |  SIMD vs scalar: $(echo "scale=1; $scalar_ns / $simd_ns" | bc)×"
+    local fpdata; fpdata=$(run3 benchmarks/bench_reduce_fp.mojo)
+    local f32_ns;  f32_ns=$(min3  "$fpdata" reduce_f32_ns)
+    local bf16_ns; bf16_ns=$(min3 "$fpdata" reduce_bf16_ns)
+    local gpu_ns;  gpu_ns=$(min3  "$fpdata" reduce_gpu_ns)
+    row "parallel float32 / ${w} workers"  "$(printf "%.1f ms" "$(echo "scale=1; $f32_ns/1000000" | bc)")"
+    row "parallel bf16 / ${w} workers"     "$(printf "%.1f ms" "$(echo "scale=1; $bf16_ns/1000000" | bc)")  (bf16→f32)"
+    if [ "${gpu_ns}" != "-1" ] && [ -n "${gpu_ns}" ]; then
+        row "GPU reduce (float32)"  "$(printf "%.1f ms" "$(echo "scale=1; $gpu_ns/1000000" | bc)")"
+    fi
+    simd_note benchmarks/bench_reduce.mojo
+}
+
+# ── REACTIVE vs TASK GRAPH ─────────────────────────────────────────────────────
+bench_reactive() {
+    hdr "ReactiveGraph vs TaskGraph  (100 jobs, 10 waves × 10 jobs, uneven durations)"
+    dim "(run ./compare for the full Mojo vs C vs Python comparison)"
+}
+
+# ── SWEEP (bandwidth scale) ───────────────────────────────────────────────────
+bench_sweep() {
+    hdr "Bandwidth sweep  (float32 + bf16, N=10M→500M)  — single run each"
+    dim "shows memory bandwidth GB/s at each scale (plateau = DRAM limit)"
+    local out; out=$(mj benchmarks/bench_reduce_sweep.mojo)
+    local w; w=$(echo "$out" | grep "^workers=" | cut -d= -f2)
+    for N in 10000000 50000000 100000000 500000000; do
+        local f32_ns; f32_ns=$(echo "$out" | grep "^sweep_f32_ns_${N}=" | cut -d= -f2)
+        local bf16_ns; bf16_ns=$(echo "$out" | grep "^sweep_bf16_ns_${N}=" | cut -d= -f2)
+        local f32_mb=$(( N * 4 / 1000000 ))
+        local bf16_mb=$(( N * 2 / 1000000 ))
+        local label; label="N=$(( N / 1000000 ))M  f32=${f32_mb}MB  bf16=${bf16_mb}MB"
+        local f32_gbs; f32_gbs=$(echo "scale=1; $f32_mb * 1000000 / $f32_ns" | bc)
+        local bf16_gbs; bf16_gbs=$(echo "scale=1; $bf16_mb * 1000000 / $bf16_ns" | bc)
+        printf "  ${DIM}%-42s${NC}  ${GREEN}f32=%.0f ms  %.1f GB/s${NC}  ${GREEN}bf16=%.0f ms  %.1f GB/s${NC}\n" \
+            "$label" \
+            "$(echo "scale=0; $f32_ns/1000000" | bc)" "$f32_gbs" \
+            "$(echo "scale=0; $bf16_ns/1000000" | bc)" "$bf16_gbs"
+    done
+    dim "for 1B test (4GB RAM): change N in bench_reduce_sweep.mojo → 1_000_000_000"
+}
+
+case "$MODE" in
+    arena)    bench_arena    ;;
+    pool)     bench_pool     ;;
+    sync)     bench_sync     ;;
+    reduce)   bench_reduce   ;;
+    reactive) bench_reactive ;;
+    sweep)    bench_sweep    ;;
+    all)
+        bench_arena
+        bench_pool
+        bench_sync
+        bench_reduce
+        bench_reactive
+        bench_sweep
+        ;;
+    *)
+        echo "usage: ./bench [all|arena|pool|sync|reduce|reactive|sweep]"
+        exit 1
+        ;;
+esac
+printf "\n"

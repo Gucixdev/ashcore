@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# ashparser stress tests — 3 extreme scenarios
+# Usage: ./stresstest [all|large|edge|roundtrip]
+set -euo pipefail
+PROJ="$(cd "$(dirname "$0")" && pwd)"
+export PATH="$HOME/.local/bin:$PATH"
+
+GREEN='\033[0;32m'; RED='\033[0;31m'; DIM='\033[2m'
+BOLD='\033[1m'; CYAN='\033[0;36m'; NC='\033[0m'
+
+FAILURES=0
+
+mj() { (cd "$PROJ" && magic run mojo run -I src "$@" 2>/dev/null); }
+
+hdr()  { printf "\n${BOLD}${CYAN}▶  %s${NC}\n" "$*"; }
+ok()   { printf "  ${GREEN}[OK]${NC}  ${BOLD}%-32s${NC}  ${DIM}%s ms${NC}\n" "$1" "$2"; }
+fail() { printf "  ${RED}[FAIL]${NC} ${BOLD}%-32s${NC}  %s\n" "$1" "$2"; FAILURES=$((FAILURES+1)); }
+
+run_stress() {
+    local name=$1 file=$2 check_key=$3 check_val=$4
+    local t0; t0=$(date +%s%N)
+    local out; out=$(mj "$file" 2>&1) || true
+    local t1; t1=$(date +%s%N)
+    local ms=$(( (t1 - t0) / 1000000 ))
+    local got; got=$(echo "$out" | grep -E "^$check_key=" | cut -d= -f2 || true)
+    if [ "$got" = "$check_val" ]; then
+        ok "$name" "$ms"
+    else
+        fail "$name" "expected $check_key=$check_val got='$got'"
+        echo "$out" | head -10 | sed 's/^/      /'
+    fi
+}
+
+stress_large() {
+    hdr "Stress 1 — Large input: 10k CSV rows, single buffer"
+    run_stress "csv-10k-rows" \
+        "benchmarks/stress/stress_large.mojo" "result" "OK"
+}
+
+stress_edge() {
+    hdr "Stress 2 — Edge cases: EOF, 10k-char token, 1k sep_by, failure paths"
+    run_stress "edge-cases" \
+        "benchmarks/stress/stress_edge.mojo" "result" "OK"
+}
+
+stress_roundtrip() {
+    hdr "Stress 3 — Round-trip: parse → rejoin → re-parse, fields must match"
+    run_stress "roundtrip-csv" \
+        "benchmarks/stress/stress_roundtrip.mojo" "result" "OK"
+}
+
+MODE="${1:-all}"
+printf "\n${BOLD}${CYAN}╔════════════════════════════════════════════════╗${NC}"
+printf "\n${BOLD}${CYAN}║       ashparser  —  Stress Tests             ║${NC}"
+printf "\n${BOLD}${CYAN}╚════════════════════════════════════════════════╝${NC}\n"
+
+case "$MODE" in
+    large)     stress_large     ;;
+    edge)      stress_edge      ;;
+    roundtrip) stress_roundtrip ;;
+    all)
+        stress_large
+        stress_edge
+        stress_roundtrip
+        ;;
+    *)
+        echo "usage: ./stresstest [all|large|edge|roundtrip]"
+        exit 1
+        ;;
+esac
+
+printf "\n"
+if [ "$FAILURES" -eq 0 ]; then
+    printf "${GREEN}${BOLD}All stress tests passed.${NC}\n\n"
+else
+    printf "${RED}${BOLD}$FAILURES stress test(s) FAILED.${NC}\n\n"
+    exit 1
+fi

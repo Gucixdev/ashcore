@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# ashparser — compare Mojo parser combinator vs Python built-ins
+# Runs CSV split benchmark in both and reports throughput.
+# Usage: ./compare [all|csv]
+set -euo pipefail
+PROJ="$(cd "$(dirname "$0")" && pwd)"
+export PATH="$HOME/.local/bin:$PATH"
+
+BOLD='\033[1m'; DIM='\033[2m'; CYAN='\033[0;36m'; GREEN='\033[0;32m'
+YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
+
+mj() { (cd "$PROJ" && magic run mojo run -I src "$@" 2>/dev/null); }
+msf() { printf "%.1f ms" "$(echo "scale=1; $1/1000000" | bc)"; }
+kv()  { echo "$1" | grep -E "^$2=" | cut -d= -f2; }
+mbps() {
+    local ns=$1 bytes=$2
+    [ "$ns" -gt 0 ] || { echo "n/a"; return; }
+    printf "%.1f MB/s" "$(echo "scale=1; $bytes * 1000 / $ns" | bc)"
+}
+
+hdr() { printf "\n${BOLD}${CYAN}▶  %s${NC}\n" "$*"; }
+row() { printf "  ${GREEN}%-28s${NC}  %-14s  %s\n" "$1" "$2" "$3"; }
+dim() { printf "  ${DIM}%s${NC}\n" "$*"; }
+
+# ── CSV: Mojo parser combinator vs Python str.split ───────────────────────────
+compare_csv() {
+    hdr "CSV parsing  (200k rows × 5 fields)  — Mojo vs Python"
+    dim "Mojo: sep_by[field, comma]  |  Python: line.split(',')"
+
+    # Mojo
+    local mj_out; mj_out=$(mj benchmarks/bench_csv.mojo)
+    local mj_ns;   mj_ns=$(kv   "$mj_out" parse_ns)
+    local mj_rows; mj_rows=$(kv "$mj_out" rows)
+    local mj_bytes; mj_bytes=$(kv "$mj_out" bytes_parsed)
+
+    # Python
+    local py_ns
+    py_ns=$(python3 - <<'PYEOF'
+import time
+N = 200_000
+row = "alpha,bravo,charlie,delta,echo"
+ok = 0
+t0 = time.perf_counter_ns()
+for _ in range(N):
+    fields = row.split(",")
+    if len(fields) == 5:
+        ok += 1
+t1 = time.perf_counter_ns()
+print(t1 - t0)
+PYEOF
+)
+
+    row "Mojo  (parser combinator)" "$(msf "$mj_ns")" "$(mbps "$mj_ns" "$mj_bytes")"
+    row "Python (str.split)"        "$(msf "$py_ns")" "$(mbps "$py_ns" "$mj_bytes")"
+
+    local ratio
+    ratio=$(echo "scale=1; $py_ns / $mj_ns" | bc 2>/dev/null || echo "?")
+    dim "Mojo is ${ratio}× faster than Python str.split"
+}
+
+# ── JSON: Mojo array parser vs Python json.loads ──────────────────────────────
+compare_json() {
+    hdr "JSON parsing  (50k arrays × 6 vals)  — Mojo vs Python"
+    dim "Mojo: manual value parser chain  |  Python: json.loads (C extension)"
+
+    local mj_out; mj_out=$(mj benchmarks/bench_json.mojo)
+    local mj_ns;    mj_ns=$(kv   "$mj_out" parse_ns)
+    local mj_iters; mj_iters=$(kv "$mj_out" iters)
+    local mj_bytes; mj_bytes=$(kv "$mj_out" bytes_parsed)
+
+    local py_ns
+    py_ns=$(python3 - <<'PYEOF'
+import time, json
+N = 50_000
+data = '[1, true, null, "hello", 42, false]'
+t0 = time.perf_counter_ns()
+for _ in range(N):
+    _ = json.loads(data)
+print(time.perf_counter_ns() - t0)
+PYEOF
+)
+
+    row "Mojo  (combinator parser)" "$(msf "$mj_ns")" "$(mbps "$mj_ns" "$mj_bytes")"
+    row "Python (json.loads C ext)" "$(msf "$py_ns")" "$(mbps "$py_ns" "$mj_bytes")"
+    local ratio; ratio=$(echo "scale=1; $py_ns / $mj_ns" | bc 2>/dev/null || echo "?")
+    dim "Mojo is ${ratio}× vs Python json.loads"
+    dim "(Python uses a highly-optimised C extension; Mojo allocates List[String])"
+}
+
+# ── Int/hex parsing: Mojo parse_int vs Python int() ──────────────────────────
+compare_int() {
+    hdr "Int/hex parsing  (1M calls each)  — Mojo vs Python"
+    dim "Mojo: parse_int / parse_uint / hex_digits  |  Python: int() built-in"
+
+    local mj_out; mj_out=$(mj benchmarks/bench_int.mojo)
+    local int_ns;  int_ns=$(kv  "$mj_out" parse_int_ns)
+    local uint_ns; uint_ns=$(kv "$mj_out" parse_uint_ns)
+    local hex_ns;  hex_ns=$(kv  "$mj_out" hex_ns)
+    local int_per; int_per=$(kv  "$mj_out" parse_int_per_ns)
+    local hex_per; hex_per=$(kv  "$mj_out" hex_per_ns)
+
+    local py_int_ns py_hex_ns
+    py_int_ns=$(python3 - <<'PYEOF'
+import time
+N = 1_000_000
+t0 = time.perf_counter_ns()
+for _ in range(N):
+    _ = int("-12345")
+print(time.perf_counter_ns() - t0)
+PYEOF
+)
+    py_hex_ns=$(python3 - <<'PYEOF'
+import time
+N = 1_000_000
+t0 = time.perf_counter_ns()
+for _ in range(N):
+    _ = int("1aFf00", 16)
+print(time.perf_counter_ns() - t0)
+PYEOF
+)
+
+    local py_int_per; py_int_per=$(echo "scale=0; $py_int_ns / 1000000" | bc)
+    local py_hex_per; py_hex_per=$(echo "scale=0; $py_hex_ns / 1000000" | bc)
+    row "Mojo  parse_int"   "${int_per} ns/call" "(total $(msf "$int_ns"))"
+    row "Python int(\"-12345\")" "${py_int_per} ns/call" "(total $(msf "$py_int_ns"))"
+    local ratio_int; ratio_int=$(echo "scale=1; $py_int_ns / $int_ns" | bc 2>/dev/null || echo "?")
+    dim "parse_int: Mojo is ${ratio_int}× vs Python int()"
+    row "Mojo  hex_digits"  "${hex_per} ns/call" "(total $(msf "$hex_ns"))"
+    row "Python int(s,16)"  "${py_hex_per} ns/call" "(total $(msf "$py_hex_ns"))"
+    local ratio_hex; ratio_hex=$(echo "scale=1; $py_hex_ns / $hex_ns" | bc 2>/dev/null || echo "?")
+    dim "hex_digits: Mojo is ${ratio_hex}× vs Python int(s,16)"
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+MODE="${1:-all}"
+
+printf "\n${BOLD}${CYAN}ashparser — cross-language comparison${NC}\n"
+
+case "$MODE" in
+    csv)  compare_csv  ;;
+    json) compare_json ;;
+    int)  compare_int  ;;
+    all)
+        compare_csv
+        compare_json
+        compare_int
+        ;;
+    *)
+        echo "usage: ./compare [all|csv|json|int]"
+        exit 1
+        ;;
+esac
+printf "\n"

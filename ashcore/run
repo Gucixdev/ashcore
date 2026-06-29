@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Usage: ./run [all|arena|jobs|queue|debug|debug|release]
+#
+#   ./run              — run all tests in release mode (DEBUG=False)
+#   ./run debug        — flip DEBUG=True, run all tests, restore
+#   ./run release      — explicitly release (same as ./run)
+#   ./run arena        — single suite in release
+#   ./run arena debug  — single suite in debug mode
+set -euo pipefail
+PROJ="$(cd "$(dirname "$0")" && pwd)"
+DEBUG_FILE="$PROJ/src/ashcore/debug.mojo"
+export PATH="$HOME/.local/bin:$PATH"
+
+GREEN='\033[0;32m'; RED='\033[0;31m'; DIM='\033[2m'; BOLD='\033[1m'
+YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+
+# ── debug mode helpers ────────────────────────────────────────────────────────
+
+DEBUG_MODE=0
+
+enable_debug() {
+    sed -i 's/comptime DEBUG: Bool = False/comptime DEBUG: Bool = True/' "$DEBUG_FILE"
+    DEBUG_MODE=1
+}
+
+disable_debug() {
+    sed -i 's/comptime DEBUG: Bool = True/comptime DEBUG: Bool = False/' "$DEBUG_FILE"
+    DEBUG_MODE=0
+}
+
+restore_debug() {
+    # Always restore to False on exit
+    sed -i 's/comptime DEBUG: Bool = True/comptime DEBUG: Bool = False/' "$DEBUG_FILE"
+}
+
+# ── test runner ───────────────────────────────────────────────────────────────
+
+run_suite() {
+    local label=$1 file=$2
+    local t0; t0=$(date +%s%N)
+    local out; out=$((cd "$PROJ" && magic run mojo run -I src "$file") 2>/dev/null)
+    local rc=$?
+    local t1; t1=$(date +%s%N)
+    local ms=$(( (t1 - t0) / 1000000 ))
+    local passed; passed=$(echo "$out" | grep -c "^  PASS" || true)
+    local failed; failed=$(echo "$out" | grep -c "^  FAIL\|^FAIL" || true)
+    if [ "$rc" -eq 0 ] && [ "$failed" -eq 0 ]; then
+        printf "${GREEN}[✓]${NC} ${BOLD}%-8s${NC}  ${GREEN}%3d passed${NC}  ${DIM}%d ms${NC}\n" \
+            "$label" "$passed" "$ms"
+    else
+        printf "${RED}[✗]${NC} ${BOLD}%-8s${NC}  ${RED}%3d failed${NC}  ${DIM}%d ms${NC}\n" \
+            "$label" "$failed" "$ms"
+        echo "$out" | grep -E "^  FAIL|^FAIL|^error" | sed 's/^/    /'
+        restore_debug
+        exit 1
+    fi
+}
+
+run_all() {
+    printf "\n"
+    run_suite "arena"  tests/test_arena.mojo
+    run_suite "jobs"   tests/test_jobs.mojo
+    run_suite "queue"  tests/test_queue.mojo
+    run_suite "debug"  tests/test_debug.mojo
+    printf "\n"
+}
+
+# ── parse args ────────────────────────────────────────────────────────────────
+
+SUITE="${1:-all}"
+MODE="${2:-release}"
+
+# Handle "debug" as first arg shorthand: ./run debug
+if [ "$SUITE" = "debug" ]; then
+    MODE="debug"
+    SUITE="all"
+fi
+
+if [ "$SUITE" = "release" ]; then
+    MODE="release"
+    SUITE="all"
+fi
+
+# ── mode banner ───────────────────────────────────────────────────────────────
+
+if [ "$MODE" = "debug" ]; then
+    trap restore_debug EXIT
+    enable_debug
+    printf "${YELLOW}[DEBUG MODE]${NC} ${DIM}DEBUG=True — all guards active${NC}\n"
+else
+    # Ensure we're in release (in case a previous run crashed without restoring)
+    disable_debug
+fi
+
+# ── run ───────────────────────────────────────────────────────────────────────
+
+case "$SUITE" in
+    all)     run_all ;;
+    arena)   run_suite "arena" tests/test_arena.mojo ;;
+    jobs)    run_suite "jobs"  tests/test_jobs.mojo  ;;
+    queue)   run_suite "queue" tests/test_queue.mojo ;;
+    debug_t) run_suite "debug" tests/test_debug.mojo ;;
+    *)       echo "usage: ./run [all|arena|jobs|queue|debug|release]"; exit 1 ;;
+esac

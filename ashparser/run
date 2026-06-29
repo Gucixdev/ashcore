@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+
+BOLD='\033[1m'; CYAN='\033[0;36m'; GREEN='\033[0;32m'; RED='\033[0;31m'; NC='\033[0m'
+
+printf "\n${BOLD}${CYAN}▶  ashparser — tests${NC}\n\n"
+
+out=$(magic run mojo run -I src tests/test_parser.mojo 2>/dev/null)
+
+echo "$out" | grep -E "^  (PASS|FAIL)|^──|^All"
+
+pass=$(echo "$out" | grep -c "^  PASS" || true)
+fail=$(echo "$out" | grep -c "^  FAIL" || true)
+
+printf "\n"
+if [ "$fail" -eq 0 ]; then
+    printf "${GREEN}${BOLD}✓  $pass passed, 0 failed.${NC}\n\n"
+else
+    printf "${RED}${BOLD}✗  $fail failed (of $((pass + fail))).${NC}\n\n"
+    exit 1
+fi

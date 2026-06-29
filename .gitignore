@@ -1,0 +1,23 @@
+# Pixi environments and lock state
+.pixi/
+
+# Mojo build artifacts
+*.o
+*.a
+*.so
+__pycache__/
+*.pyc
+
+# Compiled binaries (no extension, produced by mojo build)
+ashcore/benchmarks/_*
+ashparser/benchmarks/_*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo

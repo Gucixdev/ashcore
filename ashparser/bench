@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# ashparser — parser combinator benchmarks
+# Usage: ./bench [all|csv|json|prim]
+set -euo pipefail
+PROJ="$(cd "$(dirname "$0")" && pwd)"
+export PATH="$HOME/.local/bin:$PATH"
+
+BOLD='\033[1m'; DIM='\033[2m'; CYAN='\033[0;36m'; GREEN='\033[0;32m'
+YELLOW='\033[1;33m'; NC='\033[0m'
+
+mj() { (cd "$PROJ" && magic run mojo run -I src "$@" 2>/dev/null); }
+kv()  { echo "$1" | grep -E "^$2=" | cut -d= -f2; }
+msf() { printf "%.1f ms" "$(echo "scale=1; $1/1000000" | bc)"; }
+mbps() {
+    local ns=$1 bytes=$2
+    [ "$ns" -gt 0 ] || { echo "n/a"; return; }
+    printf "%.1f MB/s" "$(echo "scale=1; $bytes * 1000 / $ns" | bc)"
+}
+
+hdr() { printf "\n${BOLD}${CYAN}▶  %s${NC}\n" "$*"; }
+row() { printf "  ${GREEN}%-36s${NC}  %s\n" "$1" "$2"; }
+dim() { printf "  ${DIM}%s${NC}\n" "$*"; }
+
+run3() {
+    local f=$1
+    for _ in 1 2 3; do mj "$f"; echo "---"; done
+}
+
+min3() {
+    local data=$1 key=$2
+    echo "$data" | grep -E "^$key=" | cut -d= -f2 | sort -n | head -1
+}
+
+# ── CSV ───────────────────────────────────────────────────────────────────────
+bench_csv() {
+    hdr "CSV  (200k rows × 5 fields via sep_by)  — best of 3"
+    local data; data=$(run3 benchmarks/bench_csv.mojo)
+    local ns;    ns=$(min3 "$data" parse_ns)
+    local rows;  rows=$(kv "$(echo "$data" | head -4)" rows)
+    local bytes; bytes=$(kv "$(echo "$data" | head -4)" bytes_parsed)
+    local ok;    ok=$(echo "$data" | grep -E "^correct=" | head -1 | cut -d= -f2)
+    row "${rows} rows / 5 fields each" "$(msf "$ns")   $(mbps "$ns" "$bytes")   correct=${ok}"
+    dim "per-row: $(echo "scale=0; $ns / $rows" | bc) ns"
+}
+
+# ── JSON ──────────────────────────────────────────────────────────────────────
+bench_json() {
+    hdr "JSON  (50k arrays of 6 mixed values via choice+sep_by)  — best of 3"
+    local data; data=$(run3 benchmarks/bench_json.mojo)
+    local ns;    ns=$(min3 "$data" parse_ns)
+    local iters; iters=$(kv "$(echo "$data" | head -4)" iters)
+    local bytes; bytes=$(kv "$(echo "$data" | head -4)" bytes_parsed)
+    local ok;    ok=$(echo "$data" | grep -E "^correct=" | head -1 | cut -d= -f2)
+    row "${iters} arrays / 6 elements each" "$(msf "$ns")   $(mbps "$ns" "$bytes")   correct=${ok}"
+    dim "per-array: $(echo "scale=0; $ns / $iters" | bc) ns"
+}
+
+# ── PRIM ─────────────────────────────────────────────────────────────────────
+bench_prim() {
+    hdr "Primitives  (1M calls each: digits, ident, take_while)  — best of 3"
+    local data; data=$(run3 benchmarks/bench_prim.mojo)
+    local N;          N=$(kv          "$(echo "$data" | head -4)" N)
+    local dig_ns;  dig_ns=$(min3 "$data" digits_ns)
+    local id_ns;    id_ns=$(min3 "$data" ident_ns)
+    local tw_ns;    tw_ns=$(min3 "$data" take_while_ns)
+    local dig_per; dig_per=$(echo "scale=0; $dig_ns / $N" | bc)
+    local id_per;   id_per=$(echo "scale=0; $id_ns  / $N" | bc)
+    local tw_per;   tw_per=$(echo "scale=0; $tw_ns  / $N" | bc)
+    row "digits (\"12345rest\")"              "$(msf "$dig_ns")   ${dig_per} ns/call"
+    row "ident  (\"foo_bar123rest\")"         "$(msf "$id_ns")    ${id_per} ns/call"
+    row "take_while alpha (26-char string)"   "$(msf "$tw_ns")    ${tw_per} ns/call"
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+MODE="${1:-all}"
+
+printf "\n${BOLD}${CYAN}ashparser — benchmarks${NC}\n"
+
+case "$MODE" in
+    csv)  bench_csv  ;;
+    json) bench_json ;;
+    prim) bench_prim ;;
+    all)
+        bench_csv
+        bench_json
+        bench_prim
+        ;;
+    *)
+        echo "usage: ./bench [all|csv|json|prim]"
+        exit 1
+        ;;
+esac
+printf "\n"

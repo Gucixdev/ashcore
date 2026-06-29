@@ -1,0 +1,20 @@
+# Normalize line endings
+* text=auto
+
+# Mojo source
+*.mojo text eol=lf
+
+# Bash scripts (no extension) — mark as executable text
+ashcore/bench      text eol=lf
+ashcore/compare    text eol=lf
+ashcore/run        text eol=lf
+ashcore/stresstest text eol=lf
+ashcore/test       text eol=lf
+ashparser/bench    text eol=lf
+ashparser/compare  text eol=lf
+ashparser/run      text eol=lf
+ashparser/stresstest text eol=lf
+ashparser/test     text eol=lf
+
+# Binary
+*.lock binary

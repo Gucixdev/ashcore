@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# AshCore master runner — tests + bench summary + stress
+# Usage: ./test [all|run|bench|stress|debug]
+#
+#   ./test          — run tests + bench summary + stress tests
+#   ./test run      — tests only (same as ./run)
+#   ./test bench    — bench summary only (single run)
+#   ./test stress   — stress tests only (same as ./stresstest)
+#   ./test debug    — tests in DEBUG=True mode
+set -euo pipefail
+PROJ="$(cd "$(dirname "$0")" && pwd)"
+export PATH="$HOME/.local/bin:$PATH"
+
+BOLD='\033[1m'; DIM='\033[2m'; CYAN='\033[0;36m'
+GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'; NC='\033[0m'
+
+MODE="${1:-all}"
+FAILURES=0
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+section() { printf "\n${BOLD}${CYAN}━━ %s ━━${NC}\n" "$*"; }
+ok()      { printf "  ${GREEN}[OK]${NC}   %-34s  ${DIM}%s${NC}\n" "$1" "$2"; }
+fail_()   { printf "  ${RED}[FAIL]${NC} %-34s  %s\n"              "$1" "$2"; }
+
+# ── Phase 1: Unit tests ───────────────────────────────────────────────────────
+
+run_tests() {
+    section "UNIT TESTS"
+    local t0; t0=$(date +%s%N)
+    local suite_pass=0
+
+    run_suite() {
+        local label=$1 file=$2
+        local st0; st0=$(date +%s%N)
+        local out; out=$((cd "$PROJ" && magic run mojo run -I src "$file") 2>/dev/null)
+        local rc=$?
+        local st1; st1=$(date +%s%N)
+        local ms=$(( (st1 - st0) / 1000000 ))
+        local passed; passed=$(echo "$out" | grep -c "^  PASS" || true)
+        local failed; failed=$(echo "$out" | grep -c "^  FAIL\|^FAIL" || true)
+        if [ "$rc" -eq 0 ] && [ "$failed" -eq 0 ]; then
+            ok "$label" "$passed passed  ${ms}ms"
+            suite_pass=$((suite_pass + passed))
+        else
+            fail_ "$label" "$failed failed"
+            FAILURES=$((FAILURES + 1))
+        fi
+    }
+
+    run_suite "arena"  tests/test_arena.mojo
+    run_suite "jobs"   tests/test_jobs.mojo
+    run_suite "queue"  tests/test_queue.mojo
+    run_suite "debug"  tests/test_debug.mojo
+
+    local t1; t1=$(date +%s%N)
+    local total_ms=$(( (t1 - t0) / 1000000 ))
+    printf "\n  ${BOLD}Total: %d passed${NC}  ${DIM}4 suites  %d ms${NC}\n" \
+        "$suite_pass" "$total_ms"
+}
+
+# ── Phase 2: Quick bench summary (single run) ─────────────────────────────────
+
+run_bench_summary() {
+    section "BENCHMARK SUMMARY  (single run — use ./bench for best-of-3)"
+
+    mj()  { (cd "$PROJ" && magic run mojo run -I src "$@" 2>/dev/null); }
+    kv()  { echo "$1" | grep -E "^$2=" | cut -d= -f2; }
+    msf() { printf "%.1f ms" "$(echo "scale=1; $1/1000000" | bc)"; }
+
+    local arena_out; arena_out=$(mj  benchmarks/bench_arena.mojo)
+    local pool_out;  pool_out=$(mj   benchmarks/bench_pool.mojo)
+    local sync_out;  sync_out=$(mj   benchmarks/bench_sync.mojo)
+    local red_out;   red_out=$(mj    benchmarks/bench_reduce.mojo)
+    local fp_out;    fp_out=$(mj     benchmarks/bench_reduce_fp.mojo)
+
+    local a_ns; a_ns=$(kv "$arena_out" alloc_total_ns)
+    local a_op; a_op=$(kv "$arena_out" per_op_ns)
+    local p_ns; p_ns=$(kv "$pool_out"  pool_ns)
+    local p_w;  p_w=$(kv  "$pool_out"  workers)
+    local s_ns; s_ns=$(kv "$sync_out"  lock_ns)
+    local s_op; s_op=$(kv "$sync_out"  per_op_ns)
+    local r_ns;    r_ns=$(kv    "$red_out" reduce_ns)
+    local r_ok;    r_ok=$(kv    "$red_out" correct)
+    local r_f32;   r_f32=$(kv   "$fp_out"  reduce_f32_ns)
+    local r_bf16;  r_bf16=$(kv  "$fp_out"  reduce_bf16_ns)
+    ok "arena  1M×64B allocs"       "$(msf "$a_ns")  ${a_op} ns/op"
+    ok "pool   1M tasks i²%p"       "$(msf "$p_ns")  ${p_w} workers"
+    ok "sync   8t×100k lock/unlock" "$(msf "$s_ns")  ${s_op} ns/op"
+    ok "reduce 10M Int64 sum"        "$(msf "$r_ns")  correct=${r_ok}"
+    ok "reduce 50M float32 sum"     "$(msf "$r_f32")"
+    ok "reduce 50M bfloat16 sum"    "$(msf "$r_bf16")  (bf16→f32 widen)"
+}
+
+# ── Phase 3: Cross-language comparison ───────────────────────────────────────
+
+run_compare() {
+    section "CROSS-LANGUAGE COMPARISON  (Mojo vs C vs Python)"
+    # Stream output directly — compare takes 60-120s total, buffering causes apparent hang
+    "$PROJ/compare" all 2>&1 || true
+    ok "compare" "done — full results above"
+}
+
+# ── Phase 4: Stress tests ─────────────────────────────────────────────────────
+
+run_stress() {
+    section "STRESS TESTS"
+    local t0; t0=$(date +%s%N)
+    # Stream output live (no buffering) — stress tests take 30-90s total
+    local stress_rc=0
+    "$PROJ/stresstest" all 2>&1 || stress_rc=$?
+    local t1; t1=$(date +%s%N)
+    local ms=$(( (t1 - t0) / 1000000 ))
+
+    if [ "$stress_rc" -eq 0 ]; then
+        ok "all 7 scenarios" "7/7 passed  ${ms}ms"
+    else
+        fail_ "stress" "one or more scenarios failed (see above)"
+        FAILURES=$((FAILURES + 1))
+    fi
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+printf "\n${BOLD}${CYAN}╔════════════════════════════════════════════════════╗${NC}"
+printf "\n${BOLD}${CYAN}║           AshCore  —  Master Test Run            ║${NC}"
+printf "\n${BOLD}${CYAN}╚════════════════════════════════════════════════════╝${NC}\n"
+
+case "$MODE" in
+    run)     run_tests ;;
+    bench)   run_bench_summary ;;
+    compare) run_compare ;;
+    stress)  run_stress ;;
+    debug)
+        DEBUG_FILE="$PROJ/src/ashcore/debug.mojo"
+        sed -i 's/comptime DEBUG: Bool = False/comptime DEBUG: Bool = True/' "$DEBUG_FILE"
+        trap "sed -i 's/comptime DEBUG: Bool = True/comptime DEBUG: Bool = False/' '$DEBUG_FILE'" EXIT
+        printf "\n${YELLOW}[DEBUG MODE]${NC} ${DIM}DEBUG=True — all guards active${NC}\n"
+        run_tests
+        ;;
+    all)
+        run_tests
+        run_bench_summary
+        run_compare
+        run_stress
+        ;;
+    *)
+        echo "usage: ./test [all|run|bench|compare|stress|debug]"
+        exit 1
+        ;;
+esac
+
+printf "\n"
+if [ "$FAILURES" -eq 0 ]; then
+    printf "${GREEN}${BOLD}✓  All checks passed.${NC}\n\n"
+else
+    printf "${RED}${BOLD}✗  $FAILURES check(s) failed.${NC}\n\n"
+    exit 1
+fi

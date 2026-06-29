@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# AshCore stress tests — 6 extreme scenarios
+# Usage: ./stresstest [all|arena|queue|dag|lock|respawn|wrap]
+set -euo pipefail
+PROJ="$(cd "$(dirname "$0")" && pwd)"
+export PATH="$HOME/.local/bin:$PATH"
+
+GREEN='\033[0;32m'; RED='\033[0;31m'; DIM='\033[2m'
+BOLD='\033[1m'; CYAN='\033[0;36m'; NC='\033[0m'
+
+FAILURES=0
+
+mj() { (cd "$PROJ" && magic run mojo run -I src "$@" 2>/dev/null); }
+
+hdr() { printf "\n${BOLD}${CYAN}▶  %s${NC}\n" "$*"; }
+ok()  { printf "  ${GREEN}[OK]${NC}  ${BOLD}%-30s${NC}  ${DIM}%s ms${NC}\n" "$1" "$2"; }
+fail(){ printf "  ${RED}[FAIL]${NC} ${BOLD}%-30s${NC}  %s\n"              "$1" "$2"; FAILURES=$((FAILURES+1)); }
+
+run_stress() {
+    local name=$1 file=$2 check_key=$3 check_val=$4
+    local t0; t0=$(date +%s%N)
+    local out; out=$(mj "$file" 2>&1) || true
+    local t1; t1=$(date +%s%N)
+    local ms=$(( (t1 - t0) / 1000000 ))
+    local got; got=$(echo "$out" | grep -E "^$check_key=" | cut -d= -f2 || true)
+    if [ "$got" = "$check_val" ]; then
+        ok "$name" "$ms"
+    else
+        fail "$name" "expected $check_key=$check_val got='$got'"
+        echo "$out" | head -15 | sed 's/^/      /'
+    fi
+}
+
+# ── Scenarios ─────────────────────────────────────────────────────────────────
+
+stress_arena() {
+    hdr "Stress 1 — Arena: 50 forced region grows + checkpoint/restore"
+    run_stress "arena-grow-restore" \
+        "benchmarks/stress/stress_arena.mojo" "result" "OK"
+}
+
+stress_queue() {
+    hdr "Stress 2 — Queue: 4 producers × 100k events → 1 consumer"
+    run_stress "queue-flood-mpsc" \
+        "benchmarks/stress/stress_queue.mojo" "result" "OK"
+}
+
+stress_dag() {
+    hdr "Stress 3 — DAG: 1000 jobs, 5 layers × 200 (fan-out deps)"
+    run_stress "dag-1000-jobs" \
+        "benchmarks/stress/stress_dag.mojo" "result" "OK"
+}
+
+stress_lock() {
+    hdr "Stress 4 — TicketLock: counter integrity under high contention"
+    run_stress "ticketlock-W-x-500k" \
+        "benchmarks/stress/stress_lock.mojo" "result" "OK"
+}
+
+stress_respawn() {
+    hdr "Stress 5 — DAG: 100× re-execute same graph, results identical"
+    run_stress "dag-reexecute-100x" \
+        "benchmarks/stress/stress_respawn.mojo" "result" "OK"
+}
+
+stress_wrap() {
+    hdr "Stress 6 — SPSCQueue: 1M push/pop wrap-around, no corruption"
+    run_stress "spsc-wrap-1M" \
+        "benchmarks/stress/stress_wrap.mojo" "result" "OK"
+}
+
+stress_debug_guards() {
+    hdr "Stress 7 — Debug guards: dbg_assert(False) aborts process"
+    local DEBUG_FILE="$PROJ/src/ashcore/debug.mojo"
+    sed -i 's/comptime DEBUG: Bool = False/comptime DEBUG: Bool = True/' "$DEBUG_FILE"
+    # Verify sed actually changed the file before running (compile error → PASS false positive)
+    if ! grep -q "comptime DEBUG: Bool = True" "$DEBUG_FILE"; then
+        fail "debug-guard: sed failed to toggle DEBUG=True" "pattern not found in $DEBUG_FILE"
+        return
+    fi
+    local t0; t0=$(date +%s%N)
+    local rc=0
+    (cd "$PROJ" && magic run mojo run -I src \
+        benchmarks/stress/stress_debug_assert.mojo) 2>/dev/null || rc=$?
+    local t1; t1=$(date +%s%N)
+    local ms=$(( (t1 - t0) / 1000000 ))
+    sed -i 's/comptime DEBUG: Bool = True/comptime DEBUG: Bool = False/' "$DEBUG_FILE"
+    if [ "$rc" -ne 0 ]; then
+        ok "dbg_assert fires → exit $rc (SIGABRT)" "$ms"
+    else
+        fail "debug-guard: process did NOT abort" "expected non-zero exit, got 0"
+    fi
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+MODE="${1:-all}"
+printf "\n${BOLD}${CYAN}╔══════════════════════════════════════════════╗${NC}"
+printf "\n${BOLD}${CYAN}║       AshCore  —  Stress Tests             ║${NC}"
+printf "\n${BOLD}${CYAN}╚══════════════════════════════════════════════╝${NC}\n"
+
+case "$MODE" in
+    arena)         stress_arena         ;;
+    queue)         stress_queue         ;;
+    dag)           stress_dag           ;;
+    lock)          stress_lock          ;;
+    respawn)       stress_respawn       ;;
+    wrap)          stress_wrap          ;;
+    debug-guards)  stress_debug_guards  ;;
+    all)
+        stress_arena
+        stress_queue
+        stress_dag
+        stress_lock
+        stress_respawn
+        stress_wrap
+        stress_debug_guards
+        ;;
+    *) echo "usage: ./stresstest [all|arena|queue|dag|lock|respawn|wrap|debug-guards]"
+       echo "       'all' now includes debug-guards (7 scenarios total)"
+       exit 1 ;;
+esac
+
+printf "\n"
+if [ "$FAILURES" -eq 0 ]; then
+    printf "${GREEN}${BOLD}All stress tests passed.${NC}\n\n"
+else
+    printf "${RED}${BOLD}$FAILURES stress test(s) FAILED.${NC}\n\n"
+    exit 1
+fi

@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# ashparser master runner — tests + bench summary + compare + stress
+# Usage: ./test [all|run|bench|compare|stress]
+#
+#   ./test         — run tests + bench summary + stress
+#   ./test run     — unit tests only (same as ./run)
+#   ./test bench   — bench summary only (single run)
+#   ./test compare — cross-language comparison only
+#   ./test stress  — stress tests only (same as ./stresstest)
+set -euo pipefail
+PROJ="$(cd "$(dirname "$0")" && pwd)"
+export PATH="$HOME/.local/bin:$PATH"
+
+BOLD='\033[1m'; DIM='\033[2m'; CYAN='\033[0;36m'
+GREEN='\033[0;32m'; RED='\033[0;31m'; NC='\033[0m'
+
+MODE="${1:-all}"
+FAILURES=0
+
+section() { printf "\n${BOLD}${CYAN}━━ %s ━━${NC}\n" "$*"; }
+ok()      { printf "  ${GREEN}[OK]${NC}   %-34s  ${DIM}%s${NC}\n" "$1" "$2"; }
+fail_()   { printf "  ${RED}[FAIL]${NC} %-34s  %s\n"              "$1" "$2"; }
+
+# ── Phase 1: Unit tests ───────────────────────────────────────────────────────
+run_tests() {
+    section "UNIT TESTS"
+    local t0; t0=$(date +%s%N)
+
+    local out; out=$((cd "$PROJ" && magic run mojo run -I src tests/test_parser.mojo) 2>/dev/null)
+    local rc=$?
+    local t1; t1=$(date +%s%N)
+    local ms=$(( (t1 - t0) / 1000000 ))
+    local passed; passed=$(echo "$out" | grep -c "^  PASS" || true)
+    local failed; failed=$(echo "$out" | grep -c "^  FAIL" || true)
+
+    if [ "$rc" -eq 0 ] && [ "$failed" -eq 0 ]; then
+        ok "test_parser" "$passed passed  ${ms}ms"
+    else
+        fail_ "test_parser" "$failed failed"
+        echo "$out" | grep "^  FAIL" | head -10
+        FAILURES=$((FAILURES+1))
+    fi
+}
+
+# ── Phase 2: Bench summary (single run) ──────────────────────────────────────
+run_bench_summary() {
+    section "BENCHMARK SUMMARY  (single run — use ./bench for best-of-3)"
+
+    mj()  { (cd "$PROJ" && magic run mojo run -I src "$@" 2>/dev/null); }
+    kv()  { echo "$1" | grep -E "^$2=" | cut -d= -f2; }
+    msf() { printf "%.1f ms" "$(echo "scale=1; $1/1000000" | bc)"; }
+
+    local csv_out;  csv_out=$(mj  benchmarks/bench_csv.mojo)
+    local json_out; json_out=$(mj benchmarks/bench_json.mojo)
+    local prim_out; prim_out=$(mj benchmarks/bench_prim.mojo)
+
+    local csv_ns;  csv_ns=$(kv  "$csv_out"  parse_ns)
+    local csv_ok;  csv_ok=$(kv  "$csv_out"  correct)
+    local csv_r;   csv_r=$(kv   "$csv_out"  rows)
+    local json_ns; json_ns=$(kv "$json_out" parse_ns)
+    local json_ok; json_ok=$(kv "$json_out" correct)
+    local json_i;  json_i=$(kv  "$json_out" iters)
+    local dig_ns;  dig_ns=$(kv  "$prim_out" digits_ns)
+    local dig_per; dig_per=$(kv "$prim_out" digits_per_ns)
+    local id_per;  id_per=$(kv  "$prim_out" ident_per_ns)
+
+    ok "csv   ${csv_r} rows × 5 fields"   "$(msf "$csv_ns")   correct=${csv_ok}"
+    ok "json  ${json_i} arrays × 6 vals"  "$(msf "$json_ns")  correct=${json_ok}"
+    ok "prim  digits"                      "${dig_per} ns/call"
+    ok "prim  ident"                       "${id_per} ns/call"
+}
+
+# ── Phase 3: Cross-language comparison ───────────────────────────────────────
+run_compare() {
+    section "CROSS-LANGUAGE COMPARISON  (Mojo vs Python)"
+    "$PROJ/compare" all 2>&1 || true
+    ok "compare" "done"
+}
+
+# ── Phase 4: Stress tests ─────────────────────────────────────────────────────
+run_stress() {
+    section "STRESS TESTS"
+    local t0; t0=$(date +%s%N)
+    local stress_rc=0
+    "$PROJ/stresstest" all 2>&1 || stress_rc=$?
+    local t1; t1=$(date +%s%N)
+    local ms=$(( (t1 - t0) / 1000000 ))
+    if [ "$stress_rc" -eq 0 ]; then
+        ok "all 3 scenarios" "3/3 passed  ${ms}ms"
+    else
+        fail_ "stress" "one or more scenarios failed (see above)"
+        FAILURES=$((FAILURES+1))
+    fi
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+printf "\n${BOLD}${CYAN}╔══════════════════════════════════════════════════════╗${NC}"
+printf "\n${BOLD}${CYAN}║           ashparser  —  Master Test Run            ║${NC}"
+printf "\n${BOLD}${CYAN}╚══════════════════════════════════════════════════════╝${NC}\n"
+
+case "$MODE" in
+    run)     run_tests ;;
+    bench)   run_bench_summary ;;
+    compare) run_compare ;;
+    stress)  run_stress ;;
+    all)
+        run_tests
+        run_bench_summary
+        run_compare
+        run_stress
+        ;;
+    *)
+        echo "usage: ./test [all|run|bench|compare|stress]"
+        exit 1
+        ;;
+esac
+
+printf "\n"
+if [ "$FAILURES" -eq 0 ]; then
+    printf "${GREEN}${BOLD}✓  All checks passed.${NC}\n\n"
+else
+    printf "${RED}${BOLD}✗  $FAILURES check(s) failed.${NC}\n\n"
+    exit 1
+fi
