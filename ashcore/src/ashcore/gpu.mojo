@@ -1,26 +1,20 @@
 """
-AshCore - GPU acceleration layer
+AshCore - Parallel execution layer
 
-Status: CPU fallback mode.
-The build environment has a GTX 1050 Ti (Pascal, sm_61 — supported by MAX 26.4),
-but the NVIDIA driver/library version is mismatched, preventing CUDA initialisation
-at compile time.
+Currently CPU-only.  The API is forward-compatible with GPU execution: when
+MAX adds stable DeviceContext support for your target hardware, set
+GPU_AVAILABLE = True and replace _cpu_parallel_for with a kernel launch.
 
-When CUDA is fixed, enable GPU mode:
-  1. Resolve driver mismatch (reinstall nvidia-dkms matching kernel version)
-  2. Set GPU_AVAILABLE = True below
-  3. Replace _cpu_parallel_for with a DeviceContext kernel launch
-
-Architecture support in MAX 26.4:
-  NVIDIA: sm_52+  (Maxwell, Pascal, Turing, Ampere, Hopper, Blackwell)
-  AMD:    gfx90a+ (MI250X, MI300X, MI355X, Radeon 6900+)
+Architecture support in MAX 26.4 (for future GPU integration):
+  NVIDIA: sm_52+  (Maxwell and newer)
+  AMD:    gfx90a+ (MI250X, MI300X, Radeon 6900+)
   Apple:  Metal M1–M4
-  CPU:    always available (parallelize-based fallback)
+  CPU:    always available (parallelize-based fallback, used now)
 
 API:
-    GPU_AVAILABLE: Bool            — False until driver fixed
-    gpu_parallel_for[f](n)         — runs body(i) for i in [0,n)
-    gpu_info()                     — human-readable status string
+    GPU_AVAILABLE: Bool     — compile-time flag; False = CPU path
+    gpu_parallel_for[f](n)  — runs body(i) for i in [0, n) in parallel
+    gpu_info()              — human-readable runtime status string
 """
 
 from std.atomic    import Atomic
@@ -72,12 +66,7 @@ def _cpu_parallel_for[body: def(Int) capturing -> None](n: Int):
 
 
 def gpu_info() -> String:
-    """Return a human-readable GPU status string."""
+    """Return a human-readable execution-mode string."""
     if GPU_AVAILABLE:
-        return "GPU: enabled (DeviceContext)"
-    return (
-        "GPU: disabled (CPU fallback via parallelize)\n"
-        "  Hardware:  GTX 1050 Ti (Pascal, sm_61) — MAX 26.4 compatible\n"
-        "  Blocker:   NVIDIA driver/library version mismatch\n"
-        "  Fix:       reinstall nvidia-dkms to match kernel version"
-    )
+        return "parallel: GPU (DeviceContext)"
+    return "parallel: CPU (std.algorithm.parallelize, CHUNK=64)"

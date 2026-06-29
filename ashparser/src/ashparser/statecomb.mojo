@@ -8,6 +8,7 @@ slift       — promote a stateless parser to stateful (state unchanged)
 sget        — read current state (no input consumed)
 smodify     — transform state via @parameter def, no input consumed
 smap        — apply function to successful result
+sattempt    — run p; on failure reset to original ctx (input + state)
 schoice     — ordered choice (try p, fallback to q on same ctx)
 smany       — zero-or-more
 smany1      — one-or-more
@@ -76,6 +77,31 @@ def smap[T: Copyable & IC & Movable & ImplicitlyDeletable,
     var val = f(r.get())
     var out = CtxResult[U, S].success(val, r.rest)
     return out^
+
+
+# ── sattempt ─────────────────────────────────────────────────────────────────
+
+@parameter
+def sattempt[T: Copyable & IC & Movable & ImplicitlyDeletable,
+             S: Copyable & IC & Movable & ImplicitlyDeletable,
+             p: def(Ctx[S]) capturing -> CtxResult[T, S]](
+    ctx: Ctx[S]) -> CtxResult[T, S]:
+    """
+    Run p; on failure reset to the original ctx (input position AND state).
+
+    Without sattempt, a stateful parser that partially mutates state before
+    failing leaves the caller with inconsistent state.  sattempt guarantees
+    the original ctx is restored on any failure, making it safe to use as a
+    backtracking primitive in alternatives (schoice, smany, …).
+
+    Example — try a two-step stateful parse, fully backtrack on failure:
+        var r = sattempt[String, Int, my_parser](ctx)
+    """
+    var r = p(ctx)
+    if not r.ok:
+        var out = CtxResult[T, S].failure(ctx, r.msg)
+        return out^
+    return r^
 
 
 # ── schoice ───────────────────────────────────────────────────────────────────

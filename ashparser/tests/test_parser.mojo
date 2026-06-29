@@ -4,7 +4,7 @@ ashparser — test suite
 Pattern: chk(label, cond) raises on first failure.
 All parser functions used as combinator arguments must be @parameter def.
 """
-from ashparser.input  import Input
+from ashparser.input  import Input, SourceMap, LineCol
 from ashparser.result import ParseResult
 from ashparser.prim   import (
     satisfy, byte, tag, take_while, take_while1,
@@ -23,11 +23,12 @@ from ashparser.comb   import (
     peek, not_followed_by,
     verify, skip_many, skip_many1,
     count, recognize,
+    attempt,
 )
 from ashparser.state     import Ctx, CtxResult
 from ashparser.statecomb import (
     slift, sget, smodify, smap,
-    schoice, smany, smany1,
+    sattempt, schoice, smany, smany1,
     sskip_left, sskip_right,
     ssep_by, ssep_by1,
 )
@@ -510,6 +511,119 @@ def test_state() raises:
         Ctx[Int](Input.from_string(String("abc")), 0)).ok)
 
 
+# ── attempt + SourceMap ───────────────────────────────────────────────────────
+
+def test_attempt_sourcemap() raises:
+    section("attempt + SourceMap + message_ctx_fast")
+
+    # ── attempt ──────────────────────────────────────────────────────────────
+
+    # A parser that consumes 1 byte then fails — returns failure at rest+1.
+    # Without attempt the caller sees the advanced position; with attempt it
+    # sees the original input position.
+    @parameter
+    def two_alpha(inp: Input) -> ParseResult[String]:
+        var r1 = alpha(inp)
+        if not r1.ok:
+            return ParseResult[String].failure(inp, "two_alpha: no first")^
+        var r2 = alpha(r1.rest)
+        if not r2.ok:
+            # Consumed 1 byte before failing — rest is past first byte
+            return ParseResult[String].failure(r1.rest, "two_alpha: no second")^
+        var buf = String()
+        buf += chr(Int(r1.get()))
+        buf += chr(Int(r2.get()))
+        return ParseResult[String].success(buf, r2.rest)^
+
+    # Success path: attempt is transparent
+    var inp_ok = Input.from_string(String("abrest"))
+    var r1 = attempt[String, two_alpha](inp_ok)
+    chk("attempt: success ok",          r1.ok and r1.get() == "ab")
+    chk("attempt: success rest",        r1.rest.remaining() == 4)
+
+    # Partial consumption case: "a5" — 'a' consumed before '5' fails
+    var inp_a5 = Input.from_string(String("a5b"))
+    var r_raw = two_alpha(inp_a5)
+    chk("raw: partial fail pos=1",      not r_raw.ok and r_raw.rest.pos == 1)
+    var r_att = attempt[String, two_alpha](inp_a5)
+    chk("attempt: fail resets pos=0",   not r_att.ok and r_att.rest.pos == 0)
+    chk("attempt: fail msg preserved",  r_att.msg == "two_alpha: no second")
+
+    # Total failure (no consumption): attempt is transparent
+    var r_none = attempt[String, two_alpha](Input.from_string(String("5xy")))
+    chk("attempt: no-consume fail ok",  not r_none.ok and r_none.rest.pos == 0)
+
+    # ── SourceMap + LineCol ───────────────────────────────────────────────────
+
+    # "hello\nworld\nfoo"  (byte offsets 0–14)
+    # Byte 0  = 'h' → line 1, col 1
+    # Byte 5  = '\n' → line 1, col 6
+    # Byte 6  = 'w' → line 2, col 1
+    # Byte 11 = '\n' → line 2, col 6
+    # Byte 12 = 'f' → line 3, col 1
+    # Byte 14 = 'o' → line 3, col 3
+    var src = String("hello\nworld\nfoo")
+    var inp_ml = Input.from_string(src)
+    var sm = SourceMap(inp_ml)
+
+    var lc0 = sm.line_col(0)
+    chk("sourcemap: byte 0 → 1:1",   lc0.line == 1 and lc0.col == 1)
+    var lc5 = sm.line_col(5)
+    chk("sourcemap: byte 5 → 1:6",   lc5.line == 1 and lc5.col == 6)
+    var lc6 = sm.line_col(6)
+    chk("sourcemap: byte 6 → 2:1",   lc6.line == 2 and lc6.col == 1)
+    var lc11 = sm.line_col(11)
+    chk("sourcemap: byte 11 → 2:6",  lc11.line == 2 and lc11.col == 6)
+    var lc12 = sm.line_col(12)
+    chk("sourcemap: byte 12 → 3:1",  lc12.line == 3 and lc12.col == 1)
+    var lc14 = sm.line_col(14)
+    chk("sourcemap: byte 14 → 3:3",  lc14.line == 3 and lc14.col == 3)
+
+    # LineCol.__str__
+    chk("linecol: __str__",           String(lc12) == "3:1")
+
+    # ── message_ctx_fast ──────────────────────────────────────────────────────
+
+    var inp_err = Input.from_string(src)
+    var sm2 = SourceMap(inp_err)
+    # Fabricate a failure at byte 12 ('f' on line 3)
+    var fail_r = ParseResult[UInt8].failure(inp_err.advance(12), "unexpected token")
+    var ctx_msg = fail_r.message_ctx_fast(sm2)
+    chk("msg_ctx_fast: has msg",      ctx_msg.find("unexpected token") >= 0)
+    chk("msg_ctx_fast: has 3:1",      ctx_msg.find("3:1") >= 0)
+    chk("msg_ctx_fast: has byte 12",  ctx_msg.find("12") >= 0)
+
+    # ── sattempt ─────────────────────────────────────────────────────────────
+
+    # A stateful parser that increments state then tries to match "ab".
+    # On failure the state is already mutated — sattempt restores the original ctx.
+    @parameter
+    def stateful_ab(ctx: Ctx[Int]) -> CtxResult[String, Int]:
+        var new_ctx = Ctx[Int](ctx.input, ctx.state + 1)
+        var r = tag["ab"](new_ctx.input)
+        if not r.ok:
+            return CtxResult[String, Int].failure(new_ctx, r.msg)^
+        return CtxResult[String, Int].success(r.get(), Ctx[Int](r.rest, new_ctx.state))^
+
+    # Without sattempt: failure but state mutated
+    var ctx_fail = Ctx[Int](Input.from_string(String("xy")), 0)
+    var r_raw2 = stateful_ab(ctx_fail)
+    chk("sattempt: raw fail state=1", not r_raw2.ok and r_raw2.rest.state == 1)
+
+    # With sattempt: failure resets to original ctx
+    var r_sat = sattempt[String, Int, stateful_ab](ctx_fail)
+    chk("sattempt: fail ok=F",        not r_sat.ok)
+    chk("sattempt: state restored",   r_sat.rest.state == 0)
+    chk("sattempt: input restored",   r_sat.rest.input.remaining() == 2)
+
+    # Success path: sattempt is transparent
+    var ctx_ok2 = Ctx[Int](Input.from_string(String("abrest")), 5)
+    var r_ok2 = sattempt[String, Int, stateful_ab](ctx_ok2)
+    chk("sattempt: ok passes through", r_ok2.ok and r_ok2.get() == "ab")
+    chk("sattempt: ok state updated",  r_ok2.rest.state == 6)
+    chk("sattempt: ok rest",           r_ok2.rest.input.remaining() == 4)
+
+
 # ── Integration ───────────────────────────────────────────────────────────────
 
 def test_integration() raises:
@@ -568,6 +682,7 @@ def main() raises:
     test_comb()
     test_new_prim()
     test_new_comb()
+    test_attempt_sourcemap()
     test_state()
     test_integration()
     print("\nAll tests passed.")

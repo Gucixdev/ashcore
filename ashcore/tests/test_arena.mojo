@@ -274,6 +274,25 @@ def test_free_all() raises:
     print()
 
 
+# ── Arena.reset — oversized slab freed ──────────────────────────────────────
+
+def test_oversized_slab_freed() raises:
+    print("test_oversized_slab_freed")
+    var a = Arena(64)
+    # 1. alloc larger than region_sz → oversized slab appended at end
+    var _ = a.alloc(1024, 1)
+    assert_true("oversized: n_regions >= 2", a.n_regions() >= 2)
+    # 2. reset() frees oversized slabs — only the normal region survives
+    a.reset()
+    assert_eq("oversized: freed on reset → n_regions=1", a.n_regions(), 1)
+    assert_eq("oversized: used=0 after reset",            a.used(),      0)
+    # 3. arena is fully usable after freeing the oversized slab
+    var p = a.alloc(32, 1)
+    assert_true("oversized: alloc after reset ok", Int(p) != 0)
+    assert_eq("oversized: used=32 after re-alloc",  a.used(), 32)
+    print()
+
+
 # ── Arena.dump ──────────────────────────────────────────────────────────────
 
 def test_dump() raises:
@@ -283,8 +302,8 @@ def test_dump() raises:
     var s = a.dump()
     # 1. contains "Arena("
     assert_true("dump: has Arena(",   s.find("Arena(") >= 0)
-    # 2. contains "regions="
-    assert_true("dump: has regions=", s.find("regions=") >= 0)
+    # 2. contains "slabs="
+    assert_true("dump: has slabs=", s.find("slabs=") >= 0)
     # 3. non-empty string
     assert_true("dump: non-empty",    s.byte_length() > 0)
     print()
@@ -305,5 +324,6 @@ def main() raises:
     test_reset()
     test_reset_zeroed()
     test_free_all()
+    test_oversized_slab_freed()
     test_dump()
     print("=== All arena tests passed ===")
