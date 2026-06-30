@@ -19,10 +19,10 @@ Freshness thresholds:
 """
 
 from std.memory import UnsafePointer
-from ashllmtools.tools.fs    import read_text, file_exists
-from ashllmtools.tools.shell import shell_run
-from ashllmtools.context_engine import ContextChunk, AUTH_REPO, AUTH_FETCHED, AUTH_WEB
-from ashllmtools.context_engine import PRI_HIGH, PRI_MEDIUM, PRI_LOW
+from tools.fs    import read_text, file_exists
+from tools.shell import shell_run
+from context_engine import ContextChunk, AUTH_REPO, AUTH_FETCHED, AUTH_WEB
+from context_engine import PRI_HIGH, PRI_MEDIUM, PRI_LOW
 
 
 # ── Freshness thresholds ──────────────────────────────────────────────────────

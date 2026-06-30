@@ -1,6 +1,6 @@
-"""ashllmtools.tools.git — lazytools: git state via shell."""
+"""tools.git — lazytools: git state via shell."""
 
-from ashllmtools.tools.shell import shell_run, ShellResult
+from tools.shell import shell_run, ShellResult
 
 
 def git_branch_current() -> String:
@@ -41,13 +41,11 @@ def git_is_clean() -> Bool:
     return r.ok and r.stdout == ""
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
-
 def _trim(s: String) -> String:
-    """Remove trailing newline/whitespace."""
     var end = s.byte_length()
     var ptr = s.unsafe_ptr()
-    while end > 0 and (ptr[end - 1] == UInt8(10) or ptr[end - 1] == UInt8(13) or ptr[end - 1] == UInt8(32)):
+    while end > 0 and (ptr[end - 1] == UInt8(10) or ptr[end - 1] == UInt8(13)
+                       or ptr[end - 1] == UInt8(32)):
         end -= 1
     if end == 0:
         return String("")

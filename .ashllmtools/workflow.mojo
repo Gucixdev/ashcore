@@ -18,9 +18,9 @@ Exit conditions:
   error   — unrecoverable failure
 """
 
-from ashllmtools.decision_contract import Action, GuardResult, evaluate
-from ashllmtools.decision_contract import RISK_BLOCK, RISK_HIGH, RISK_LOW
-from ashllmtools.decision_contract import risk_name, _contains
+from decision_contract import Action, GuardResult, evaluate
+from decision_contract import RISK_BLOCK, RISK_HIGH, RISK_LOW
+from decision_contract import risk_name, _contains
 
 
 # ── Task status ───────────────────────────────────────────────────────────────

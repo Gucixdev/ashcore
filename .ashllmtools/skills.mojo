@@ -14,10 +14,10 @@ Each skill is registered in SkillRegistry by name and description.
 Dispatch: registry.run(name, input) → SkillResult.
 """
 
-from ashllmtools.tools.shell import shell_run
-from ashllmtools.tools.git   import git_status, git_diff_staged
-from ashllmtools.tools.fs    import read_text, file_exists
-from ashllmtools.decision_contract import _contains
+from tools.shell import shell_run
+from tools.git   import git_status, git_diff_staged
+from tools.fs    import read_text, file_exists
+from decision_contract import _contains
 
 
 # ── SkillResult ───────────────────────────────────────────────────────────────

@@ -1,28 +1,29 @@
 """ashllmtools — test suite."""
 
-from ashllmtools.tools.fs import show_tree, file_info, system_info
-from ashllmtools.decision_contract import (
+from tools.fs    import show_tree, file_info, system_info, scan_log, write_text
+from tools.shell import shell_run
+from decision_contract import (
     Action, evaluate, _contains,
     RISK_LOW, RISK_MEDIUM, RISK_HIGH, RISK_BLOCK,
 )
-from ashllmtools.agent_state import (
+from agent_state import (
     StateMachine,
     STATE_REACT, STATE_PLAN, STATE_AUTO, STATE_PASS, STATE_EVAL,
     EV_GOAL_DETECTED, EV_PLAN_APPROVED, EV_PLAN_REJECTED,
     EV_AUTO_CMD, EV_STOP_CMD, EV_REACT_CMD, EV_EVAL_CMD,
     EV_STEP_DONE, EV_BLOCKED, EV_GOAL_DONE, EV_USER_MSG,
 )
-from ashllmtools.memory import (
+from memory import (
     NoteMemory, EpisodicMemory, SemanticMemory, LongTermMemory,
 )
-from ashllmtools.context_engine import (
+from context_engine import (
     ContextChunk, ContextEngine,
     PRI_CRITICAL, PRI_HIGH, PRI_MEDIUM, PRI_LOW,
     AUTH_REPO, AUTH_SESSION, AUTH_FETCHED, AUTH_WEB,
 )
-from ashllmtools.rag import Document, RAGPipeline, FRESH_FETCHED
-from ashllmtools.workflow import WorkflowEngine, LOOP_DONE, LOOP_BLOCKED, TS_DONE
-from ashllmtools.skills import SkillRegistry, SkillResult
+from rag import Document, RAGPipeline, FRESH_FETCHED
+from workflow import WorkflowEngine, LOOP_DONE, LOOP_BLOCKED, TS_DONE
+from skills import SkillRegistry, SkillResult
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -382,7 +383,7 @@ def test_skills():
     ok(len(names) >= 15, "list returns all skills including custom")
 
 
-# ── fs: show_tree / file_info / system_info ───────────────────────────────────
+# ── fs: show_tree / file_info / system_info / scan_log ───────────────────────
 
 def test_fs_extended():
     # show_tree: returns non-empty string for any real path
@@ -407,6 +408,44 @@ def test_fs_extended():
     ok(si.byte_length() > 0, "system_info returns output")
     ok(_find_pos(si, "kernel=") >= 0 or _find_pos(si, "unavailable") >= 0,
        "system_info contains kernel or unavailable marker")
+
+    # scan_log: non-existent file → error message
+    var sl_bad = scan_log("/nonexistent_log.txt")
+    ok(_find_pos(sl_bad, "not found") >= 0, "scan_log missing file returns not-found")
+
+    # scan_log: tail of /proc/version (always exists on Linux)
+    var sl = scan_log("/proc/version", last_n=5)
+    ok(sl.byte_length() > 0, "scan_log /proc/version returns output")
+
+    # scan_log: pattern that matches nothing → no-matches message
+    var sl_nm = scan_log("/proc/version", pattern="XXXXXXNOTPRESENT")
+    ok(_find_pos(sl_nm, "no matches") >= 0, "scan_log no matches returns message")
+
+    # scan_log: level shorthand on a synthesised log
+    # (write a tiny temp log, scan it, clean up)
+    var tmp = "/tmp/_ash_scan_log_test.log"
+    try:
+        write_text(tmp,
+            "INFO  app started\n"
+            + "DEBUG connecting\n"
+            + "ERROR database timeout\n"
+            + "WARN  retry 1\n"
+            + "INFO  recovered\n"
+        )
+        var err_lines = scan_log(tmp, level="error")
+        ok(_find_pos(err_lines, "ERROR") >= 0, "scan_log level=error finds ERROR line")
+
+        var warn_lines = scan_log(tmp, level="warn")
+        ok(_find_pos(warn_lines, "WARN") >= 0, "scan_log level=warn finds WARN line")
+
+        var combo = scan_log(tmp, pattern="database", level="warn")
+        ok(combo.byte_length() > 0, "scan_log pattern+level combo returns output")
+
+        var all_lines = scan_log(tmp, last_n=3)
+        ok(all_lines.byte_length() > 0, "scan_log tail-only returns output")
+        _ = shell_run("rm -f " + tmp + " 2>/dev/null")
+    except:
+        _ = shell_run("rm -f " + tmp + " 2>/dev/null")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
