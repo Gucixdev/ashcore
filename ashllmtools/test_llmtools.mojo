@@ -1,7 +1,7 @@
 """ashllmtools — test suite."""
 
-from tools.fs    import show_tree, file_info, system_info, scan_log, write_text
-from tools.shell import shell_run
+from tools.sys.fs    import show_tree, file_info, system_info, scan_log, write_text
+from tools.sys.shell import shell_run
 from decision_contract import (
     Action, evaluate, _contains,
     RISK_LOW, RISK_MEDIUM, RISK_HIGH, RISK_BLOCK,

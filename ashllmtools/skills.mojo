@@ -14,10 +14,10 @@ Each skill is registered in SkillRegistry by name and description.
 Dispatch: registry.run(name, input) → SkillResult.
 """
 
-from tools.shell import shell_run
-from tools.git   import git_status, git_diff_staged
-from tools.fs    import read_text, file_exists
-from decision_contract import _contains
+from tools.sys.shell import shell_run
+from tools.sys.git   import git_status, git_diff_staged
+from tools.sys.fs    import read_text, file_exists
+from decision_contract import _contains, Action, evaluate, RISK_BLOCK
 
 
 # ── SkillResult ───────────────────────────────────────────────────────────────
@@ -144,7 +144,14 @@ struct SkillRegistry(Movable):
         self._skills.append(Skill(name=name, desc=desc, category=category))
 
     def run(self, name: String, inp: String) -> SkillResult:
-        """Dispatch to built-in or return failure if unknown."""
+        """Dispatch to built-in skill.
+        Decision contract is the FIRST gate — no skill executes if blocked."""
+        # ── Decision contract firewall ────────────────────────────────────────
+        var action = Action(cmd=name + "(" + inp + ")", scope="skill")
+        var guard  = evaluate(action)
+        if guard.is_block():
+            return SkillResult.failure("BLOCKED [contract]: " + guard.reason)
+        # ── Dispatch ─────────────────────────────────────────────────────────
         if name == "git_status":   return skill_git_status(inp)
         if name == "git_diff":     return skill_git_diff(inp)
         if name == "read_file":    return skill_read_file(inp)
