@@ -16,6 +16,7 @@ from ashparser.prim   import (
     hex_digit, hex_digits,
     parse_uint, parse_int,
     quoted_string,
+    any_byte, take, is_a, is_not, take_while_m_n, parse_float,
 )
 from ashparser.comb   import (
     Pair, opt, many, many1, map, choice,
@@ -25,6 +26,7 @@ from ashparser.comb   import (
     verify, skip_many, skip_many1,
     count, recognize,
     attempt,
+    flat_map, value, fold_many0, fold_many1, cond,
 )
 from ashparser.state     import Ctx, CtxResult
 from ashparser.statecomb import (
@@ -319,6 +321,66 @@ def test_new_prim() raises:
     chk("quoted unterminated",   not quoted_string(Input.from_string(String("\"abc"))).ok)
     var r24 = quoted_string(Input.from_string(String("\"\" rest")))
     chk("quoted empty string",   r24.ok and r24.get() == "")
+    chk("quoted bad escape",     not quoted_string(Input.from_string(String("\"\\x41\""))).ok)
+
+    # any_byte
+    var r25 = any_byte(Input.from_string(String("ABC")))
+    chk("any_byte ok",           r25.ok and r25.get() == 65)
+    chk("any_byte advances",     r25.rest.remaining() == 2)
+    chk("any_byte EOF fail",     not any_byte(Input.from_string(String(""))).ok)
+
+    # take[N]
+    var r26 = take[3](Input.from_string(String("hello")))
+    chk("take[3] ok",            r26.ok and r26.get() == "hel")
+    chk("take[3] rest",          r26.rest.remaining() == 2)
+    chk("take[0] ok",            take[0](Input.from_string(String("x"))).ok)
+    chk("take[3] short fail",    not take[3](Input.from_string(String("ab"))).ok)
+
+    # is_a
+    var r27 = is_a["0123456789"](Input.from_string(String("123abc")))
+    chk("is_a ok",               r27.ok and r27.get() == "123")
+    chk("is_a rest",             r27.rest.remaining() == 3)
+    chk("is_a fail",             not is_a["0123456789"](Input.from_string(String("abc"))).ok)
+    chk("is_a EOF fail",         not is_a["abc"](Input.from_string(String(""))).ok)
+
+    # is_not
+    var r28 = is_not[","](Input.from_string(String("hello,world")))
+    chk("is_not ok",             r28.ok and r28.get() == "hello")
+    chk("is_not rest",           r28.rest.remaining() == 6)
+    chk("is_not stop at delim",  not is_not[","](Input.from_string(String(",x"))).ok)
+    chk("is_not EOF fail",       not is_not[","](Input.from_string(String(""))).ok)
+
+    # take_while_m_n
+    var r29 = take_while_m_n[2, 5, _is_digit](Input.from_string(String("12345678")))
+    chk("twmn cap at MAX",       r29.ok and r29.get() == "12345")
+    var r30 = take_while_m_n[2, 5, _is_digit](Input.from_string(String("12abc")))
+    chk("twmn in range",         r30.ok and r30.get() == "12")
+    chk("twmn below MIN fail",   not take_while_m_n[2, 5, _is_digit](Input.from_string(String("1abc"))).ok)
+    chk("twmn zero match fail",  not take_while_m_n[1, 3, _is_digit](Input.from_string(String("abc"))).ok)
+
+    # parse_float
+    var r31 = parse_float(Input.from_string(String("3.14")))
+    chk("parse_float 3.14",      r31.ok and r31.get() > 3.13 and r31.get() < 3.15)
+    var r32 = parse_float(Input.from_string(String("-0.5")))
+    chk("parse_float -0.5",      r32.ok and r32.get() == -0.5)
+    var r33 = parse_float(Input.from_string(String("1e2")))
+    chk("parse_float 1e2",       r33.ok and r33.get() == 100.0)
+    var r34 = parse_float(Input.from_string(String("2.5e-1")))
+    chk("parse_float 2.5e-1",    r34.ok and r34.get() == 0.25)
+    var r35 = parse_float(Input.from_string(String("1e400")))
+    chk("parse_float 1e400",     r35.ok and r35.get() > 1e300)
+    var r36 = parse_float(Input.from_string(String("1e99999")))
+    chk("parse_float 1e99999",   r36.ok and r36.get() > 1e300)
+    chk("parse_float no digits", not parse_float(Input.from_string(String("abc"))).ok)
+    chk("parse_float sign only", not parse_float(Input.from_string(String("-"))).ok)
+
+    # parse_uint / parse_int boundary values
+    var r37 = parse_uint(Input.from_string(String("18446744073709551615")))
+    chk("parse_uint UINT64_MAX", r37.ok and r37.get() == 18446744073709551615)
+    chk("parse_uint overflow",   not parse_uint(Input.from_string(String("18446744073709551616"))).ok)
+    var r38 = parse_int(Input.from_string(String("9223372036854775807")))
+    chk("parse_int INT64_MAX",   r38.ok and r38.get() == 9223372036854775807)
+    chk("parse_int overflow",    not parse_int(Input.from_string(String("9223372036854775808"))).ok)
 
 
 # ── New combinators ────────────────────────────────────────────────────────────
@@ -385,6 +447,47 @@ def test_new_comb() raises:
     # recognize with many — captures raw bytes of multi-parse
     var r12 = recognize[List[UInt8], many[UInt8, digit]](Input.from_string(String("456xyz")))
     chk("recognize many",        r12.ok and r12.get() == "456")
+
+    # flat_map — dependent sequencing: read byte, then dispatch on its value
+    @parameter
+    def pick_tag(b: UInt8, rest: Input) -> ParseResult[String]:
+        if b == 49:   # '1'
+            return tag["a"](rest)^
+        return tag["b"](rest)^
+
+    var r13 = flat_map[UInt8, String, digit, pick_tag](Input.from_string(String("1a")))
+    chk("flat_map first branch", r13.ok and r13.get() == "a")
+    var r14 = flat_map[UInt8, String, digit, pick_tag](Input.from_string(String("2b")))
+    chk("flat_map second branch", r14.ok and r14.get() == "b")
+    chk("flat_map p fail",       not flat_map[UInt8, String, digit, pick_tag](Input.from_string(String("xb"))).ok)
+    chk("flat_map f fail",       not flat_map[UInt8, String, digit, pick_tag](Input.from_string(String("1b"))).ok)
+
+    # value — map a successful parse to a constant
+    var r15 = value[UInt8, Bool, digit](True, Input.from_string(String("5rest")))
+    chk("value ok",              r15.ok and r15.get() == True)
+    chk("value rest",            r15.rest.remaining() == 4)
+    chk("value fail",            not value[UInt8, Bool, digit](True, Input.from_string(String("x"))).ok)
+
+    # fold_many0 / fold_many1 — accumulating loops
+    @parameter
+    def add_digit(acc: Int, b: UInt8) -> Int:
+        return acc * 10 + Int(b) - 48
+
+    var r16 = fold_many0[UInt8, Int, digit, add_digit](0, Input.from_string(String("123abc")))
+    chk("fold_many0 ok",         r16.ok and r16.get() == 123)
+    var r17 = fold_many0[UInt8, Int, digit, add_digit](0, Input.from_string(String("abc")))
+    chk("fold_many0 zero ok",    r17.ok and r17.get() == 0)
+    var r18 = fold_many1[UInt8, Int, digit, add_digit](0, Input.from_string(String("456xyz")))
+    chk("fold_many1 ok",         r18.ok and r18.get() == 456)
+    chk("fold_many1 fail",       not fold_many1[UInt8, Int, digit, add_digit](0, Input.from_string(String("xyz"))).ok)
+
+    # cond — predicate-gated parsing
+    var r19 = cond[UInt8, digit](True, Input.from_string(String("5rest")))
+    chk("cond True ok",          r19.ok and r19.get() == 53)
+    chk("cond True rest",        r19.rest.remaining() == 4)
+    var r20 = cond[UInt8, digit](False, Input.from_string(String("5rest")))
+    chk("cond False fail",       not r20.ok)
+    chk("cond False no consume", r20.rest.remaining() == 5)
 
 
 # ── Stateful parsing ──────────────────────────────────────────────────────────

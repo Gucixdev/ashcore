@@ -124,6 +124,8 @@ def smany[T: Copyable & IC & Movable & ImplicitlyDeletable,
         var r = p(cur)
         if not r.ok:
             break
+        if r.rest.input.pos == cur.input.pos:   # zero-progress guard
+            break
         results.append(r.get())
         cur = r.rest
     return CtxResult[List[T], S].success(results, cur)^
@@ -144,6 +146,8 @@ def smany1[T: Copyable & IC & Movable & ImplicitlyDeletable,
     while True:
         var r = p(cur)
         if not r.ok:
+            break
+        if r.rest.input.pos == cur.input.pos:   # zero-progress guard
             break
         results.append(r.get())
         cur = r.rest

@@ -24,6 +24,7 @@ Guards:
 """
 
 from std.ffi import external_call
+from std.sys import llvm_intrinsic
 
 
 comptime DEBUG: Bool = False
@@ -88,6 +89,10 @@ def dbg_eq(a: Int, b: Int, ctx: String):
 
 @always_inline
 def dbg_unreachable(ctx: String):
-    """Mark code that must never execute. Aborts if reached in debug."""
+    """Mark code that must never execute.
+    In debug: prints context and calls abort().
+    In release: emits llvm.trap (SIGILL) — execution never continues."""
     if DEBUG:
         _abort("[ASHEN] unreachable: " + ctx)
+    else:
+        _ = llvm_intrinsic["llvm.trap", NoneType]()

@@ -236,22 +236,28 @@ def hex_digits(inp: Input) -> ParseResult[String]:
 
 @parameter
 def parse_uint(inp: Input) -> ParseResult[UInt64]:
-    """Consume one or more ASCII digits, parse as UInt64."""
+    """Consume one or more ASCII digits, parse as UInt64.
+    Fails with an error if the value exceeds UInt64 maximum (18446744073709551615)."""
     var pos = inp.pos
     var end = inp.len
     var ptr = inp._ptr()
     if pos >= end or not _is_digit(ptr[pos]):
         return ParseResult[UInt64].failure(inp, "parse_uint: no digits")^
+    alias UINT64_MAX = UInt64(18446744073709551615)
     var val = UInt64(0)
     while pos < end and _is_digit(ptr[pos]):
-        val = val * 10 + UInt64(ptr[pos]) - 48
+        var d = UInt64(ptr[pos]) - 48
+        if val > (UINT64_MAX - d) // 10:
+            return ParseResult[UInt64].failure(inp, "parse_uint: overflow")^
+        val = val * 10 + d
         pos += 1
     return ParseResult[UInt64].success(val, inp.at(pos))^
 
 
 @parameter
 def parse_int(inp: Input) -> ParseResult[Int64]:
-    """Consume optional '-' then digits, parse as Int64."""
+    """Consume optional '-' then digits, parse as Int64.
+    Fails with an error if the value exceeds Int64 range (-9223372036854775808..9223372036854775807)."""
     var pos = inp.pos
     var end = inp.len
     var ptr = inp._ptr()
@@ -261,9 +267,13 @@ def parse_int(inp: Input) -> ParseResult[Int64]:
         pos += 1
     if pos >= end or not _is_digit(ptr[pos]):
         return ParseResult[Int64].failure(inp, "parse_int: expected digits")^
+    alias INT64_MAX = Int64(9223372036854775807)
     var val = Int64(0)
     while pos < end and _is_digit(ptr[pos]):
-        val = val * 10 + Int64(ptr[pos]) - 48
+        var d = Int64(ptr[pos]) - 48
+        if val > (INT64_MAX - d) // 10:
+            return ParseResult[Int64].failure(inp, "parse_int: overflow")^
+        val = val * 10 + d
         pos += 1
     if neg:
         val = -val
@@ -274,10 +284,13 @@ def parse_int(inp: Input) -> ParseResult[Int64]:
 
 @parameter
 def _escape(nxt: UInt8) -> UInt8:
+    """Return the escaped byte, or 0 as a sentinel for unrecognized sequences."""
     if nxt == 110: return 10   # \n
     if nxt == 116: return 9    # \t
     if nxt == 114: return 13   # \r
-    return nxt                 # \", \\, or pass-through
+    if nxt == 34:  return 34   # \"
+    if nxt == 92:  return 92   # \\
+    return 0                   # unrecognized — caller should fail
 
 
 @parameter
@@ -297,7 +310,12 @@ def quoted_string(inp: Input) -> ParseResult[String]:
             var s = String(StringSlice(ptr=buf.unsafe_ptr(), length=len(buf) - 1))
             return ParseResult[String].success(s, inp.at(pos + 1))^
         if b == 92 and pos + 1 < end:  # backslash
-            buf.append(_escape(ptr[pos + 1])); pos += 2
+            var esc = _escape(ptr[pos + 1])
+            if esc == 0:
+                return ParseResult[String].failure(
+                    inp, "quoted_string: unrecognized escape sequence"
+                )^
+            buf.append(esc); pos += 2
         else:
             buf.append(b); pos += 1
     return ParseResult[String].failure(inp, "quoted_string: unterminated string")^
@@ -441,10 +459,22 @@ def parse_float(inp: Input) -> ParseResult[Float64]:
         var exp_val = Int(0)
         while pos < end and _is_digit(ptr[pos]):
             exp_val = exp_val * 10 + Int(ptr[pos]) - 48
+            # Cap to avoid integer overflow; beyond 400 saturates Float64 to inf/0.
+            if exp_val > 400:
+                exp_val = 400
+                while pos < end and _is_digit(ptr[pos]):
+                    pos += 1
+                break
             pos += 1
+        # Fast exponentiation O(log exp_val) instead of O(exp_val) loop.
         var exp_factor = Float64(1)
-        for _ in range(exp_val):
-            exp_factor *= 10.0
+        var base = Float64(10)
+        var e = exp_val
+        while e > 0:
+            if e & 1 == 1:
+                exp_factor *= base
+            base *= base
+            e >>= 1
         if exp_neg:
             val = val / exp_factor
         else:

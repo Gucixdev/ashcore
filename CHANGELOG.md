@@ -23,6 +23,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `fileio.mojo` — `StreamingInput._fill()`: replaced O(n) byte-by-byte leftover shift
   with a single `memmove` syscall; read() returning -1 (I/O error) now sets `has_error()`
   instead of being silently treated as EOF; `from_file()` validates `chunk_size > 0`
+- `fileio.mojo` — `StreamingInput.from_file()` now opens with `O_RDONLY | O_CLOEXEC`
+  (was `O_RDONLY` only) to prevent fd inheritance by child processes after `fork`/`exec`
+- `fileio.mojo` — `StreamingInput.next_line()` now sets `last_line_truncated() → True`
+  when a line exceeds `chunk_size`; previously the truncation was silent and undetectable
+- `prim.mojo` — `parse_float` exponent accumulation is now capped at 400 (beyond Float64
+  max ~1e308), preventing signed-integer overflow on inputs like `"1e9999999999999999999"`;
+  exponent scaling replaced with O(log n) fast exponentiation (was O(exp_val) loop, a DoS
+  vector for inputs like `"1e100000"`)
+- `prim.mojo` — `parse_uint` / `parse_int` detect overflow during digit accumulation and
+  return a `failure` result; previously very long digit strings caused silent UInt64/Int64
+  wrap-around
+- `prim.mojo` — `quoted_string` / `_escape` now reject unrecognized escape sequences
+  (e.g. `"\x41"`) with a parse failure; previously the backslash was silently dropped
+- `input.mojo` — `peek_at(offset)` now guards against negative computed indices
+  (`pos + offset < 0`) which caused out-of-bounds reads before the buffer start
+- `comb.mojo` — `many`, `many1`, `skip_many`, `skip_many1`, `fold_many0`, `fold_many1`
+  all have a zero-progress guard: if the inner parser succeeds without advancing the
+  input position the loop exits, preventing infinite loops on zero-width parsers
+- `statecomb.mojo` — same zero-progress guard applied to `smany` and `smany1`
+
+### ashcore
+#### Fixed
+- `arena.mojo` — `alloc()` now checks for integer overflow before computing
+  `aligned + size`; pathological allocations can no longer wrap the bump pointer
+  into valid-looking but wrong memory
+- `debug.mojo` — `dbg_unreachable()` now emits `llvm.trap` (SIGILL) in release
+  builds; previously the release path was a silent no-op, letting execution continue
+  past supposedly unreachable code
 
 ---
 

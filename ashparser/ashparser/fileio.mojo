@@ -65,35 +65,38 @@ struct StreamingInput(Movable, ImplicitlyDeletable):
     the internal buffer. Call your parser immediately; do not store the Input
     across another next_line() / next_chunk() call.
     """
-    var _fd:          Int32
-    var _buf:         UnsafePointer[UInt8]
-    var _chunk_size:  Int
-    var _buf_pos:     Int    # current read cursor inside buffer
-    var _buf_len:     Int    # number of valid bytes in buffer
-    var _eof:         Bool
-    var _read_error:  Bool   # True if a read() syscall returned an error
-    var _owned:       Bool   # True when this instance owns fd + buf
+    var _fd:            Int32
+    var _buf:           UnsafePointer[UInt8]
+    var _chunk_size:    Int
+    var _buf_pos:       Int    # current read cursor inside buffer
+    var _buf_len:       Int    # number of valid bytes in buffer
+    var _eof:           Bool
+    var _read_error:    Bool   # True if a read() syscall returned an error
+    var _last_truncated: Bool  # True if last next_line() was truncated at chunk_size
+    var _owned:         Bool   # True when this instance owns fd + buf
 
     def __init__(out self, fd: Int32, buf: UnsafePointer[UInt8], chunk_size: Int):
-        self._fd          = fd
-        self._buf         = buf
-        self._chunk_size  = chunk_size
-        self._buf_pos     = 0
-        self._buf_len     = 0
-        self._eof         = False
-        self._read_error  = False
-        self._owned       = True
+        self._fd             = fd
+        self._buf            = buf
+        self._chunk_size     = chunk_size
+        self._buf_pos        = 0
+        self._buf_len        = 0
+        self._eof            = False
+        self._read_error     = False
+        self._last_truncated = False
+        self._owned          = True
 
     def __moveinit__(out self, owned other: Self):
-        self._fd          = other._fd
-        self._buf         = other._buf
-        self._chunk_size  = other._chunk_size
-        self._buf_pos     = other._buf_pos
-        self._buf_len     = other._buf_len
-        self._eof         = other._eof
-        self._read_error  = other._read_error
-        self._owned       = other._owned
-        other._owned      = False   # transfer ownership
+        self._fd             = other._fd
+        self._buf            = other._buf
+        self._chunk_size     = other._chunk_size
+        self._buf_pos        = other._buf_pos
+        self._buf_len        = other._buf_len
+        self._eof            = other._eof
+        self._read_error     = other._read_error
+        self._last_truncated = other._last_truncated
+        self._owned          = other._owned
+        other._owned         = False   # transfer ownership
 
     def __del__(owned self):
         if self._owned:
@@ -110,8 +113,8 @@ struct StreamingInput(Movable, ImplicitlyDeletable):
         """
         if chunk_size <= 0:
             raise Error("StreamingInput: chunk_size must be > 0")
-        # O_RDONLY = 0 on Linux
-        var fd = external_call["open", Int32](path.unsafe_ptr(), Int32(0))
+        # O_RDONLY=0 | O_CLOEXEC=0x80000 — prevents fd leaking into child processes.
+        var fd = external_call["open", Int32](path.unsafe_ptr(), Int32(0x80000))
         if fd < 0:
             raise Error("StreamingInput: cannot open '" + path + "'")
         var buf = UnsafePointer[UInt8].alloc(chunk_size)
@@ -129,6 +132,12 @@ struct StreamingInput(Movable, ImplicitlyDeletable):
         """True if a read() syscall returned an error (errno set by OS)."""
         return self._read_error
 
+    def last_line_truncated(self) -> Bool:
+        """True if the most recent next_line() call returned a line that was
+        truncated at chunk_size (the logical line was longer than the buffer).
+        Call rewind() or increase chunk_size if this is a problem."""
+        return self._last_truncated
+
     # ── Line-by-line API ─────────────────────────────────────────────────────
 
     def next_line(mut self) -> Input:
@@ -143,19 +152,23 @@ struct StreamingInput(Movable, ImplicitlyDeletable):
             var i     = start
             while i < self._buf_len:
                 if self._buf[i] == 10:   # '\n'
-                    self._buf_pos = i + 1
+                    self._buf_pos        = i + 1
+                    self._last_truncated = False
                     return Input(Int(self._buf) + start, 0, i - start)
                 i += 1
 
             # No newline found in buffer.
             if self._eof:
                 # Last line has no trailing newline — return whatever is left.
-                self._buf_pos = self._buf_len
+                self._buf_pos        = self._buf_len
+                self._last_truncated = False
                 return Input(Int(self._buf) + start, 0, self._buf_len - start)
 
-            # Guard: line longer than chunk_size → return the full buffer.
+            # Guard: line longer than chunk_size → return the full buffer as a
+            # truncated line and signal via last_line_truncated().
             if start == 0 and self._buf_len == self._chunk_size:
-                self._buf_pos = self._buf_len
+                self._buf_pos        = self._buf_len
+                self._last_truncated = True
                 return Input(Int(self._buf), 0, self._chunk_size)
 
             # Shift unfinished line to front, then refill.

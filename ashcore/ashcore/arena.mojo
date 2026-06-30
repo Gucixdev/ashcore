@@ -125,12 +125,15 @@ struct Arena(Movable):
         dbg_power_of_two(alignment, "Arena.alloc: alignment")
 
         var aligned = _align_up(self._pos, alignment)
-        var end     = aligned + size
 
-        if end > self._sizes[self._region]:
+        # Overflow guard: if aligned + size would wrap, treat as out-of-space.
+        alias MAX_INT = 9223372036854775807
+        var needs_grow = (aligned > MAX_INT - size) or (aligned + size > self._sizes[self._region])
+        if needs_grow:
             self._grow(size)
             aligned = _align_up(0, alignment)
-            end     = aligned + size
+
+        var end = aligned + size
 
         var addr  = self._ptrs[self._region] + aligned
         self._pos = end

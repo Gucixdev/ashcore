@@ -53,6 +53,8 @@ def many[T: Copyable & Movable & ImplicitlyDeletable,
         var r = p(cur)
         if not r.ok:
             break
+        if r.rest.pos == cur.pos:   # zero-progress guard
+            break
         results.append(r.get())
         cur = r.rest
     return ParseResult[List[T]].success(results, cur)^
@@ -72,6 +74,8 @@ def many1[T: Copyable & Movable & ImplicitlyDeletable,
     while True:
         var r = p(cur)
         if not r.ok:
+            break
+        if r.rest.pos == cur.pos:   # zero-progress guard
             break
         results.append(r.get())
         cur = r.rest
@@ -290,6 +294,8 @@ def skip_many[T: Copyable & Movable & ImplicitlyDeletable,
         var r = p(cur)
         if not r.ok:
             break
+        if r.rest.pos == cur.pos:   # zero-progress guard
+            break
         cur = r.rest
     return ParseResult[UInt8].success(0, cur)^
 
@@ -305,6 +311,8 @@ def skip_many1[T: Copyable & Movable & ImplicitlyDeletable,
     while True:
         var r = p(cur)
         if not r.ok:
+            break
+        if r.rest.pos == cur.pos:   # zero-progress guard
             break
         cur = r.rest
     return ParseResult[UInt8].success(0, cur)^
@@ -403,6 +411,8 @@ def fold_many0[T: Copyable & Movable & ImplicitlyDeletable,
         var r = p(cur)
         if not r.ok:
             break
+        if r.rest.pos == cur.pos:   # zero-progress guard
+            break
         acc = f(acc, r.get())
         cur = r.rest
     return ParseResult[Acc].success(acc, cur)^
@@ -423,6 +433,8 @@ def fold_many1[T: Copyable & Movable & ImplicitlyDeletable,
     while True:
         var r = p(cur)
         if not r.ok:
+            break
+        if r.rest.pos == cur.pos:   # zero-progress guard
             break
         acc = f(acc, r.get())
         cur = r.rest

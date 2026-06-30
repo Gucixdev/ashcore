@@ -55,7 +55,7 @@ struct Input(Copyable, ImplicitlyCopyable, Movable, ImplicitlyDeletable):
     def peek_at(self, offset: Int) -> UInt8:
         """Byte at pos+offset, or 0 if out of bounds."""
         var i = self.pos + offset
-        if i >= self.len:
+        if i < 0 or i >= self.len:
             return 0
         return self._ptr()[i]
 
