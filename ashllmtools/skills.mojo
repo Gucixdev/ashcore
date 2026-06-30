@@ -18,6 +18,10 @@ from tools.sys.shell import shell_run
 from tools.sys.git   import git_status, git_diff_staged
 from tools.sys.fs    import read_text, file_exists
 from decision_contract import _contains, Action, evaluate, RISK_BLOCK
+from tools.trading.price      import fetch_quote, fetch_close_csv
+from tools.trading.indicators import compute_indicator, _parse_csv_floats, _f2s, _list_last
+from tools.trading.signals    import detect_signal
+from tools.trading.portfolio  import portfolio_summary
 
 
 # ── SkillResult ───────────────────────────────────────────────────────────────
@@ -344,6 +348,219 @@ def skill_stresstest(inp: String) -> SkillResult:
     return SkillResult.success(out)
 
 
+# ── Trading skill implementations ────────────────────────────────────────────
+
+def skill_price_fetch(inp: String) -> SkillResult:
+    """Fetch latest market quote for a symbol. inp='AAPL' or 'BTC-USD'."""
+    var symbol = inp
+    var n = inp.byte_length()
+    var ptr = inp.unsafe_ptr()
+    var lo = 0
+    var hi = n
+    while lo < n and (ptr[lo] == 32 or ptr[lo] == 9): lo += 1
+    while hi > lo and (ptr[hi-1] == 32 or ptr[hi-1] == 9): hi -= 1
+    symbol = inp[lo:hi]
+    if symbol == "":
+        return SkillResult.failure("price_fetch: no symbol provided")
+    var result = fetch_quote(symbol)
+    if _contains(result, "error:"):
+        return SkillResult.failure(result)
+    return SkillResult.success(result)
+
+
+def skill_indicator_calc(inp: String) -> SkillResult:
+    """Compute a technical indicator on price data.
+    inp format: 'prices:100.5,101,99.8,... indicator:sma period:5'
+    or bare CSV with defaults (sma, period 10)."""
+    if inp == "":
+        return SkillResult.failure("indicator_calc: no input")
+    var prices_csv = inp
+    var indicator  = String("sma")
+    var period     = 10
+    # Parse keyword args if present
+    var inp_n = inp.byte_length()
+    var inp_p = inp.unsafe_ptr()
+    if _contains(inp, "prices:"):
+        var markers = List[String]()
+        markers.append("prices:")
+        markers.append(" indicator:")
+        markers.append(" period:")
+        # Extract prices: value
+        var key = String("prices:")
+        var kl  = key.byte_length()
+        var kp  = key.unsafe_ptr()
+        for i in range(inp_n - kl + 1):
+            var hit = True
+            for j in range(kl):
+                if inp_p[i+j] != kp[j]:
+                    hit = False; break
+            if hit:
+                var k = i + kl
+                while k < inp_n and inp_p[k] == 32: k += 1
+                var end = k
+                while end < inp_n and inp_p[end] != 32: end += 1
+                prices_csv = inp[k:end]
+                break
+        # Extract indicator:
+        var key2 = String(" indicator:")
+        var k2l  = key2.byte_length()
+        var k2p  = key2.unsafe_ptr()
+        for i in range(inp_n - k2l + 1):
+            var hit = True
+            for j in range(k2l):
+                if inp_p[i+j] != k2p[j]:
+                    hit = False; break
+            if hit:
+                var k = i + k2l
+                while k < inp_n and inp_p[k] == 32: k += 1
+                var end = k
+                while end < inp_n and inp_p[end] != 32: end += 1
+                indicator = inp[k:end]
+                break
+        # Extract period:
+        var key3 = String(" period:")
+        var k3l  = key3.byte_length()
+        var k3p  = key3.unsafe_ptr()
+        for i in range(inp_n - k3l + 1):
+            var hit = True
+            for j in range(k3l):
+                if inp_p[i+j] != k3p[j]:
+                    hit = False; break
+            if hit:
+                var k = i + k3l
+                while k < inp_n and inp_p[k] == 32: k += 1
+                var end = k
+                while end < inp_n and inp_p[end] != 32: end += 1
+                var tok = inp[k:end]
+                var pp = tok.unsafe_ptr()
+                var pv = 0
+                for ci in range(tok.byte_length()):
+                    if pp[ci] >= 48 and pp[ci] <= 57:
+                        pv = pv * 10 + Int(pp[ci]) - 48
+                if pv > 0: period = pv
+                break
+    var result = compute_indicator(prices_csv, indicator, period)
+    if _contains(result, "error:"):
+        return SkillResult.failure(result)
+    return SkillResult.success(result)
+
+
+def skill_signal_detect(inp: String) -> SkillResult:
+    """Detect buy/sell/hold signal from comma-separated price CSV.
+    inp: '100.5,101.2,99.8,...' (min slow+1 values, default slow=20)."""
+    if inp == "":
+        return SkillResult.failure("signal_detect: no price data provided")
+    var result = detect_signal(inp)
+    if _contains(result, "error:"):
+        return SkillResult.failure(result)
+    return SkillResult.success(result)
+
+
+def skill_portfolio_analyze(inp: String) -> SkillResult:
+    """Analyze a portfolio from text.
+    inp format (one position per line): 'AAPL 100 150.50'  (symbol qty cost)
+    cash line: 'cash 5000'."""
+    if inp == "":
+        return SkillResult.failure("portfolio_analyze: no portfolio data provided")
+    var result = portfolio_summary(inp)
+    if _contains(result, "error:"):
+        return SkillResult.failure(result)
+    return SkillResult.success(result)
+
+
+def skill_backtest(inp: String) -> SkillResult:
+    """Simple SMA crossover backtest on price CSV.
+    inp: 'prices:100,101,...  fast:5  slow:20'  → trades + final PnL."""
+    if inp == "":
+        return SkillResult.failure("backtest: no input provided")
+    # Parse prices_csv (use full inp as fallback)
+    var prices_csv = inp
+    var fast_p = 5
+    var slow_p = 20
+    var inp_n = inp.byte_length()
+    var inp_ptr = inp.unsafe_ptr()
+    # Extract prices: section if present
+    var pk = String("prices:")
+    var pkl = pk.byte_length()
+    var pkp = pk.unsafe_ptr()
+    for i in range(inp_n - pkl + 1):
+        var hit = True
+        for j in range(pkl):
+            if inp_ptr[i+j] != pkp[j]:
+                hit = False; break
+        if hit:
+            var k = i + pkl
+            var end = k
+            while end < inp_n and inp_ptr[end] != 32: end += 1
+            prices_csv = inp[k:end]
+            break
+    # Extract fast: and slow:
+    for kw_str in List[String]("fast:", "slow:"):
+        var kw = kw_str
+        var kl = kw.byte_length()
+        var kp = kw.unsafe_ptr()
+        for i in range(inp_n - kl + 1):
+            var hit = True
+            for j in range(kl):
+                if inp_ptr[i+j] != kp[j]:
+                    hit = False; break
+            if hit:
+                var k = i + kl
+                var end = k
+                while end < inp_n and inp_ptr[end] != 32: end += 1
+                var tok = inp[k:end]
+                var tp = tok.unsafe_ptr()
+                var tv = 0
+                for ci in range(tok.byte_length()):
+                    if tp[ci] >= 48 and tp[ci] <= 57:
+                        tv = tv * 10 + Int(tp[ci]) - 48
+                if tv > 0:
+                    if kw_str == "fast:":
+                        fast_p = tv
+                    else:
+                        slow_p = tv
+                break
+    from tools.trading.indicators import sma as _sma
+    var prices = _parse_csv_floats(prices_csv)
+    var n = len(prices)
+    if n < slow_p + 2:
+        return SkillResult.failure(
+            "backtest: need at least " + String(slow_p + 2) + " prices"
+        )
+    var fast_vals = _sma(prices, fast_p)
+    var slow_vals = _sma(prices, slow_p)
+    # Align: fast is longer; offset = fast_len - slow_len
+    var fast_len = len(fast_vals)
+    var slow_len = len(slow_vals)
+    var offset   = fast_len - slow_len
+    var trades   = 0
+    var position = False
+    var entry    = Float64(0)
+    var pnl      = Float64(0)
+    for i in range(1, slow_len):
+        var f_prev = fast_vals[offset + i - 1]
+        var s_prev = slow_vals[i - 1]
+        var f_cur  = fast_vals[offset + i]
+        var s_cur  = slow_vals[i]
+        if not position and f_prev <= s_prev and f_cur > s_cur:
+            position = True
+            entry    = prices[i + slow_p - 1]
+            trades  += 1
+        elif position and f_prev >= s_prev and f_cur < s_cur:
+            position = False
+            pnl     += prices[i + slow_p - 1] - entry
+            entry    = Float64(0)
+    if position:
+        pnl += prices[n - 1] - entry  # mark-to-market
+    return SkillResult.success(
+        "backtest: fast=" + String(fast_p) + " slow=" + String(slow_p)
+        + " bars=" + String(n)
+        + " trades=" + String(trades)
+        + " pnl=" + _f2s(pnl)
+        + (" (open_position)" if position else "")
+    )
+
+
 # ── SkillRegistry ─────────────────────────────────────────────────────────────
 
 struct SkillRegistry(Movable):
@@ -388,7 +605,12 @@ struct SkillRegistry(Movable):
         if name == "bughunt":      return skill_bughunt(inp)
         if name == "review":       return skill_review(inp)
         if name == "refactor":     return skill_refactor(inp)
-        if name == "stresstest":   return skill_stresstest(inp)
+        if name == "stresstest":       return skill_stresstest(inp)
+        if name == "price_fetch":      return skill_price_fetch(inp)
+        if name == "indicator_calc":   return skill_indicator_calc(inp)
+        if name == "signal_detect":    return skill_signal_detect(inp)
+        if name == "portfolio_analyze":return skill_portfolio_analyze(inp)
+        if name == "backtest":         return skill_backtest(inp)
         return SkillResult.failure("unknown skill: " + name)
 
     def list(self) -> List[String]:
@@ -421,4 +643,9 @@ struct SkillRegistry(Movable):
         self.register("stresstest",  "find edge cases in code",        "code")
         self.register("review",      "code review with verdict",       "code")
         self.register("refactor",    "targeted code improvement",      "code")
-        self.register("schedule",    "sequence tasks by dependency",   "cognitive")
+        self.register("schedule",         "sequence tasks by dependency",   "cognitive")
+        self.register("price_fetch",      "fetch latest market quote",      "trading")
+        self.register("indicator_calc",   "compute SMA/EMA/RSI/MACD",      "trading")
+        self.register("signal_detect",    "buy/sell/hold signal from prices","trading")
+        self.register("portfolio_analyze","P&L and allocation breakdown",   "trading")
+        self.register("backtest",         "SMA crossover backtest",         "trading")

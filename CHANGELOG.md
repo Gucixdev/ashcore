@@ -16,6 +16,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   trailing `(ctx)` annotation on any fact line; `DSLFact` struct, `parse_fact`,
   `parse_facts`, and `DSLStore` collection with `query_lhs`, `query_op`,
   `query_rhs`, `get`, `has`, `add_text`, `clear`, `to_string`
+- `tools/trading/` — new trading tool layer (4 modules):
+  - `price.mojo` — `fetch_quote`, `fetch_close_csv` via Yahoo Finance / curl
+  - `indicators.mojo` — `sma`, `ema`, `rsi`, `macd`, `compute_indicator`;
+    helpers `_parse_csv_floats`, `_f2s`, `_list_last`
+  - `signals.mojo` — `detect_signal`: SMA crossover + RSI overbought/oversold
+  - `portfolio.mojo` — `Position`, `Portfolio`, `parse_portfolio`,
+    `portfolio_summary`; `Portfolio.to_dsl()` serializes to DSL facts
+- `skills.mojo` — 5 new trading skills: `price_fetch`, `indicator_calc`,
+  `signal_detect`, `portfolio_analyze`, `backtest` (SMA crossover);
+  registered under `"trading"` category
+- `skills/trading/` — 5 skill spec docs: `price_fetch.md`, `indicator_calc.md`,
+  `signal_detect.md`, `portfolio_analyze.md`, `backtest.md`
+- `workflow/trading/` — 3 workflow docs: `scan.md` (watchlist signal scoring),
+  `analyze.md` (single instrument deep dive), `strategy.md` (iterative backtest
+  refinement with DSL fact recording and acceptance criteria)
 - `dsl.mojo` — `DSLStore.update(lhs, op, rhs)` upserts a fact (preserving
   existing `ctx`); `DSLStore.remove(lhs, op)` deletes all matching facts
 - `world_model.mojo` — `WorldModel` now embeds a `DSLStore` as `facts` field;

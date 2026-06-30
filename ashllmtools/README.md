@@ -144,6 +144,64 @@ wm.record("api_key << vault")
 print(wm.facts_to_string())
 ```
 
+## Trading layer
+
+### Tools (`tools/trading/`)
+
+| Module | Functions |
+|--------|-----------|
+| `price.mojo`      | `fetch_quote(symbol)`, `fetch_close_csv(symbol, days)` |
+| `indicators.mojo` | `sma`, `ema`, `rsi`, `macd`, `compute_indicator`, `_parse_csv_floats`, `_f2s` |
+| `signals.mojo`    | `detect_signal(prices_csv, fast, slow, rsi_period)` |
+| `portfolio.mojo`  | `Portfolio`, `Position`, `parse_portfolio(text)`, `portfolio_summary(text)` |
+
+### Skills (`trading` category)
+
+| Name | Description |
+|------|-------------|
+| `price_fetch`       | Fetch latest quote — `AAPL` → `price=182.50 change_pct=-0.42` |
+| `indicator_calc`    | Compute SMA/EMA/RSI/MACD on price CSV |
+| `signal_detect`     | SMA crossover + RSI → `signal=BUY\|SELL\|HOLD` |
+| `portfolio_analyze` | P&L breakdown + allocation percentages |
+| `backtest`          | SMA crossover backtest → trades count + PnL |
+
+### Workflows (`workflow/trading/`)
+
+| File | Purpose |
+|------|---------|
+| `scan.md`     | Score a watchlist for signals, record DSL facts |
+| `analyze.md`  | Deep-dive single instrument: quote → indicators → decide |
+| `strategy.md` | Develop + validate a strategy via iterative backtest |
+
+### Quick start — trading
+
+```mojo
+from skills import SkillRegistry
+
+var reg = SkillRegistry()
+
+# Fetch quote
+var q = reg.run("price_fetch", "AAPL")
+print(q.output)   # symbol=AAPL price=182.50 change_pct=-0.42
+
+# Compute RSI on price series
+var r = reg.run("indicator_calc",
+    "prices:100,102,101,99,103,105,104,107 indicator:rsi period:5")
+print(r.output)   # indicator=rsi period=5 last=68.42 series=...
+
+# Signal from CSV
+var s = reg.run("signal_detect", "100,101,99,102,103,101,105,107,106,109,111")
+print(s.output)   # signal=BUY rsi=... sma_fast=... sma_slow=... reason=...
+
+# Portfolio analysis
+var p = reg.run("portfolio_analyze", "AAPL 100 150.50\nGOOGL 10 2800.00\ncash 5000")
+print(p.output)   # positions=2 invested=43050.00 cash=5000.00 ...
+
+# Backtest
+var b = reg.run("backtest", "prices:100,101,99,102,103,101,105,107,106,109,111,112 fast:3 slow:5")
+print(b.output)   # backtest: fast=3 slow=5 bars=12 trades=2 pnl=...
+```
+
 ## Tests
 
 ```bash
