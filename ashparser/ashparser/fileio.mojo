@@ -189,14 +189,18 @@ struct StreamingInput(Movable, ImplicitlyDeletable):
             self._fill()
         var start  = self._buf_pos
         var length = self._buf_len - start
-        self._buf_pos = self._buf_len   # mark all consumed
+        self._buf_pos        = self._buf_len   # mark all consumed
+        self._last_truncated = False
         return Input(Int(self._buf) + start, 0, length)
 
     def rewind(mut self, n: Int):
         """
         Mark the last `n` bytes as unconsumed — they will appear at the start
         of the next chunk. Use with next_chunk() to handle split records.
+        Negative n is a no-op (no bytes are "un-consumed").
         """
+        if n <= 0:
+            return
         var new_pos = self._buf_pos - n
         self._buf_pos = new_pos if new_pos >= 0 else 0
 

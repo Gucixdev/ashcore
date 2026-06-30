@@ -375,6 +375,11 @@ def test_new_prim() raises:
     chk("parse_float 1e99999",   r36.ok and r36.get() > 1e300)
     chk("parse_float no digits", not parse_float(Input.from_string(String("abc"))).ok)
     chk("parse_float sign only", not parse_float(Input.from_string(String("-"))).ok)
+    var r36b = parse_float(Input.from_string(String("+1.5")))
+    chk("parse_float +1.5",      r36b.ok and r36b.get() == 1.5)
+    var r36c = parse_float(Input.from_string(String(".75")))
+    chk("parse_float .75",       r36c.ok and r36c.get() == 0.75)
+    chk("parse_float bare dot",  not parse_float(Input.from_string(String("."))).ok)
 
     # parse_uint / parse_int boundary values
     var r37 = parse_uint(Input.from_string(String("18446744073709551615")))

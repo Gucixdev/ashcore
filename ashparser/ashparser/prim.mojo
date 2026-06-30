@@ -419,7 +419,11 @@ def take_while_m_n[MIN: Int, MAX: Int,
 
 @parameter
 def parse_float(inp: Input) -> ParseResult[Float64]:
-    """Parse [-] digits [. digits] [e/E [+/-] digits] into Float64."""
+    """Parse an IEEE-style decimal into Float64.
+
+    Grammar: [+/-] (digits [. digits] | . digits) [e/E [+/-] digits]
+    Accepts: `3.14`, `.5`, `+1.0`, `-2e3`, `1.5E-10`
+    """
     var pos = inp.pos
     var end = inp.len
     var ptr = inp._ptr()
@@ -428,9 +432,14 @@ def parse_float(inp: Input) -> ParseResult[Float64]:
     if pos < end and ptr[pos] == 45:   # '-'
         neg = True
         pos += 1
-    # Integer part — at least one digit required
-    if pos >= end or not _is_digit(ptr[pos]):
+    elif pos < end and ptr[pos] == 43:   # '+'
+        pos += 1
+    # Require at least one digit (integer part) OR a leading '.' followed by a digit
+    var has_int = pos < end and _is_digit(ptr[pos])
+    var has_dot = pos < end and ptr[pos] == 46   # '.'
+    if not has_int and not has_dot:
         return ParseResult[Float64].failure(inp, "parse_float: expected digit")^
+    # Integer part (optional when leading '.' is present)
     var int_part = Float64(0)
     while pos < end and _is_digit(ptr[pos]):
         int_part = int_part * 10.0 + Float64(Int(ptr[pos]) - 48)
@@ -440,6 +449,8 @@ def parse_float(inp: Input) -> ParseResult[Float64]:
     var frac_exp = Float64(1)
     if pos < end and ptr[pos] == 46:   # '.'
         pos += 1
+        if not has_int and (pos >= end or not _is_digit(ptr[pos])):
+            return ParseResult[Float64].failure(inp, "parse_float: expected digit after '.'")^
         while pos < end and _is_digit(ptr[pos]):
             frac     = frac * 10.0 + Float64(Int(ptr[pos]) - 48)
             frac_exp *= 10.0

@@ -24,6 +24,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `example/calc.mojo` — guard against division by zero (`raise Error`)
 
 #### Fixed
+- `arena.mojo` — `reset()` now scans the full slab list (not just from the end)
+  so that oversized slabs sandwiched between normal slabs are freed instead of
+  leaking until `free_all()`
+- `fileio.mojo` — `rewind(n)` with `n ≤ 0` is now a no-op; previously negative
+  `n` advanced `_buf_pos` forward potentially past `_buf_len`
+- `fileio.mojo` — `next_chunk()` now resets `_last_truncated` to `False`; the
+  flag from a prior `next_line()` truncation was leaking into chunk reads
+- `prim.mojo` — `parse_float` now accepts a leading `+` sign (`+1.5`) and a
+  leading dot without an integer part (`.75`); was silently rejected before
+- `sourcemap.mojo` — `line_col(pos)` clamps negative `pos` to 0 instead of
+  returning a col ≤ 0 which violated the 1-based invariant
+
+#### Fixed
 - `fileio.mojo` — `StreamingInput._fill()`: replaced O(n) byte-by-byte leftover shift
   with a single `memmove` syscall; read() returning -1 (I/O error) now sets `has_error()`
   instead of being silently treated as EOF; `from_file()` validates `chunk_size > 0`

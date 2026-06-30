@@ -198,18 +198,21 @@ struct Arena(Movable):
 
     def reset(mut self):
         """
-        O(1) rewind.  Normal-sized slabs are kept for reuse on the next run.
+        Rewind.  Normal-sized slabs are kept for reuse on the next run.
         Oversized slabs (from large one-off allocs) are freed to prevent
         memory bloat across request / frame cycles.
+
+        Full-list scan (not end-only) so that oversized slabs sandwiched
+        between two normal slabs are also freed instead of leaking.
         """
-        # _grow() always appends oversized slabs at the end of the list.
-        while len(self._ptrs) > 1:
-            var last = len(self._ptrs) - 1
-            if self._sizes[last] > self._rgn_sz:
-                _slab_del(self._ptrs.pop())
-                _ = self._sizes.pop()
+        var i = 1  # keep slab 0 — always normal-sized, allocated in __init__
+        while i < len(self._ptrs):
+            if self._sizes[i] > self._rgn_sz:
+                _slab_del(self._ptrs[i])
+                _ = self._ptrs.pop(i)
+                _ = self._sizes.pop(i)
             else:
-                break
+                i += 1
         self._region = 0
         self._pos    = 0
 

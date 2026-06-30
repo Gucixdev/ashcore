@@ -28,7 +28,9 @@ struct SourceMap(Movable, ImplicitlyDeletable):
                 self._offsets.append(i + 1)
 
     def line_col(self, pos: Int) -> LineCol:
-        """Return 1-based (line, col) for byte offset `pos`.  O(log n)."""
+        """Return 1-based (line, col) for byte offset `pos`.  O(log n).
+        Negative pos is clamped to 0 (→ line 1, col 1)."""
+        var pos = pos if pos >= 0 else 0
         var lo = 0
         var hi = len(self._offsets) - 1
         while lo < hi:
