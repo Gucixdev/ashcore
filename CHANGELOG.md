@@ -18,6 +18,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `comb.mojo` — new combinators: `flat_map` (dependent/monadic sequencing),
   `value` (map match to constant), `fold_many0` / `fold_many1` (accumulating loops),
   `cond` (predicate-gated parsing)
+- `statecomb.mojo` — complete stateful API parity: `sseq`, `sbetween`, `scount`,
+  `srecognize`, `svalue`, `sflat_map`, `sfold_many0`, `sfold_many1`, `scond`;
+  mirrors every stateless combinator that was missing a stateful equivalent
+- `example/calc.mojo` — guard against division by zero (`raise Error`)
 
 #### Fixed
 - `fileio.mojo` — `StreamingInput._fill()`: replaced O(n) byte-by-byte leftover shift

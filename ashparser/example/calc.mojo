@@ -72,6 +72,8 @@ def eval_expr(src: String) raises -> Int:
         elif o == 42:
             acc = acc * v
         elif o == 47:
+            if v == 0:
+                raise Error("division by zero")
             acc = acc // v
     return acc
 

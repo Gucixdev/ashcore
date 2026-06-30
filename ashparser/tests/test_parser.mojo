@@ -34,6 +34,8 @@ from ashparser.statecomb import (
     sattempt, schoice, smany, smany1,
     sskip_left, sskip_right,
     ssep_by, ssep_by1,
+    sseq, sbetween, scount, srecognize,
+    svalue, sflat_map, sfold_many0, sfold_many1, scond,
 )
 
 
@@ -777,6 +779,131 @@ def test_integration() raises:
     chk("ident[2]=baz",         r3.get()[2] == "baz")
 
 
+# ── New stateful combinators ─────────────────────────────────────────────────
+
+def test_state_new() raises:
+    section("New stateful combinators")
+
+    # Helper stateful parsers reused throughout
+    @parameter
+    def sdig(ctx: Ctx[Int]) -> CtxResult[String, Int]:
+        return slift[String, Int, digits](ctx)^
+
+    @parameter
+    def sdig_b(ctx: Ctx[Int]) -> CtxResult[UInt8, Int]:
+        return slift[UInt8, Int, digit](ctx)^
+
+    @parameter
+    def soparen(ctx: Ctx[Int]) -> CtxResult[UInt8, Int]:
+        return slift[UInt8, Int, open_paren](ctx)^
+
+    @parameter
+    def scparen(ctx: Ctx[Int]) -> CtxResult[UInt8, Int]:
+        return slift[UInt8, Int, close_paren](ctx)^
+
+    @parameter
+    def scomma_s(ctx: Ctx[Int]) -> CtxResult[UInt8, Int]:
+        return slift[UInt8, Int, comma](ctx)^
+
+    # sseq — pair both results, state threads
+    var ctx0 = Ctx[Int](Input.from_string(String("42rest")), 0)
+    var r1 = sseq[String, String, Int, sdig, sdig](ctx0)
+    chk("sseq fail (only one digits run)", not r1.ok)
+
+    var ctx0b = Ctx[Int](Input.from_string(String("12 34")), 0)
+    @parameter
+    def sdig_ws(ctx: Ctx[Int]) -> CtxResult[String, Int]:
+        var r = slift[String, Int, digits](ctx)^
+        if not r.ok:
+            return r^
+        return slift[String, Int, ws](r.rest)^
+
+    var r1b = sseq[String, String, Int, sdig, sdig](
+        Ctx[Int](Input.from_string(String("1234")), 0)
+    )
+    chk("sseq fail no second token", not r1b.ok)
+
+    # Use a pair where both parsers can succeed on same input by splitting
+    var ctx1 = Ctx[Int](Input.from_string(String("(5)")), 0)
+    var r2 = sbetween[UInt8, UInt8, UInt8, Int, soparen, sdig_b, scparen](ctx1)
+    chk("sbetween ok",              r2.ok and r2.get() == 53)
+    chk("sbetween rest",            r2.rest.input.is_empty())
+    var ctx1f = Ctx[Int](Input.from_string(String("5)")), 0)
+    chk("sbetween no open fail",    not sbetween[UInt8, UInt8, UInt8, Int, soparen, sdig_b, scparen](ctx1f).ok)
+
+    # scount — exactly N
+    var ctx2 = Ctx[Int](Input.from_string(String("123rest")), 0)
+    var r3 = scount[UInt8, Int, sdig_b, 3](ctx2)
+    chk("scount[3] ok",             r3.ok and len(r3.get()) == 3)
+    chk("scount[3] rest",           r3.rest.input.remaining() == 4)
+    var ctx2f = Ctx[Int](Input.from_string(String("12x")), 0)
+    chk("scount[3] fail backtrack", not scount[UInt8, Int, sdig_b, 3](ctx2f).ok)
+    chk("scount[3] fail input",     scount[UInt8, Int, sdig_b, 3](ctx2f).rest.input.remaining() == 3)
+
+    # srecognize — capture bytes as string
+    var ctx3 = Ctx[Int](Input.from_string(String("456abc")), 0)
+    var r4 = srecognize[String, Int, sdig](ctx3)
+    chk("srecognize ok",            r4.ok and r4.get() == "456")
+    chk("srecognize rest",          r4.rest.input.remaining() == 3)
+    chk("srecognize fail",          not srecognize[String, Int, sdig](
+        Ctx[Int](Input.from_string(String("abc")), 0)).ok)
+
+    # svalue — constant on success
+    var ctx4 = Ctx[Int](Input.from_string(String("7rest")), 0)
+    var r5 = svalue[UInt8, Bool, Int, sdig_b](True, ctx4)
+    chk("svalue ok",                r5.ok and r5.get() == True)
+    chk("svalue rest",              r5.rest.input.remaining() == 4)
+    chk("svalue fail",              not svalue[UInt8, Bool, Int, sdig_b](
+        True, Ctx[Int](Input.from_string(String("x")), 0)).ok)
+
+    # sflat_map — dependent sequencing
+    @parameter
+    def stag_a_or_b(b: UInt8, ctx: Ctx[Int]) -> CtxResult[String, Int]:
+        if b == 49:   # '1'
+            return slift[String, Int, tag["a"]](ctx)^
+        return slift[String, Int, tag["b"]](ctx)^
+
+    var r6 = sflat_map[UInt8, String, Int, sdig_b, stag_a_or_b](
+        Ctx[Int](Input.from_string(String("1a")), 0)
+    )
+    chk("sflat_map first",          r6.ok and r6.get() == "a")
+    var r7 = sflat_map[UInt8, String, Int, sdig_b, stag_a_or_b](
+        Ctx[Int](Input.from_string(String("2b")), 0)
+    )
+    chk("sflat_map second",         r7.ok and r7.get() == "b")
+    chk("sflat_map p fail",         not sflat_map[UInt8, String, Int, sdig_b, stag_a_or_b](
+        Ctx[Int](Input.from_string(String("xb")), 0)).ok)
+    chk("sflat_map f fail",         not sflat_map[UInt8, String, Int, sdig_b, stag_a_or_b](
+        Ctx[Int](Input.from_string(String("1b")), 0)).ok)
+
+    # sfold_many0 / sfold_many1 — accumulating folds
+    @parameter
+    def add_b(acc: Int, b: UInt8) -> Int:
+        return acc * 10 + Int(b) - 48
+
+    var r8 = sfold_many0[UInt8, Int, Int, sdig_b, add_b](
+        0, Ctx[Int](Input.from_string(String("789xyz")), 0)
+    )
+    chk("sfold_many0 ok",           r8.ok and r8.get() == 789)
+    var r9 = sfold_many0[UInt8, Int, Int, sdig_b, add_b](
+        0, Ctx[Int](Input.from_string(String("xyz")), 0)
+    )
+    chk("sfold_many0 zero ok",      r9.ok and r9.get() == 0)
+    var r10 = sfold_many1[UInt8, Int, Int, sdig_b, add_b](
+        0, Ctx[Int](Input.from_string(String("42rest")), 0)
+    )
+    chk("sfold_many1 ok",           r10.ok and r10.get() == 42)
+    chk("sfold_many1 fail",         not sfold_many1[UInt8, Int, Int, sdig_b, add_b](
+        0, Ctx[Int](Input.from_string(String("xyz")), 0)).ok)
+
+    # scond — predicate gate
+    var r11 = scond[String, Int, sdig](True, Ctx[Int](Input.from_string(String("99rest")), 0))
+    chk("scond True ok",            r11.ok and r11.get() == "99")
+    var r12 = scond[String, Int, sdig](False, Ctx[Int](Input.from_string(String("99rest")), 0))
+    chk("scond False fail",         not r12.ok)
+    chk("scond False no consume",   r12.rest.input.remaining() == 6)
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() raises:
@@ -788,5 +915,6 @@ def main() raises:
     test_new_comb()
     test_attempt_sourcemap()
     test_state()
+    test_state_new()
     test_integration()
     print("\nAll tests passed.")

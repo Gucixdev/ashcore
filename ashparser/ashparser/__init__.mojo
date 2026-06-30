@@ -5,9 +5,11 @@ from ashparser.fileio    import read_file, StreamingInput
 from ashparser.state     import Ctx, CtxResult
 from ashparser.statecomb import (
     slift, sget, smodify, smap,
-    schoice, smany, smany1,
+    sattempt, schoice, smany, smany1,
     sskip_left, sskip_right,
     ssep_by, ssep_by1,
+    sseq, sbetween, scount, srecognize,
+    svalue, sflat_map, sfold_many0, sfold_many1, scond,
 )
 from ashparser.prim   import (
     satisfy, byte, tag, take_while, take_while1,
