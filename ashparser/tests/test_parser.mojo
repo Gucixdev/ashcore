@@ -28,6 +28,12 @@ from ashparser.comb   import (
     attempt,
     flat_map, value, fold_many0, fold_many1, cond,
 )
+from ashparser.p import (
+    P,
+    p_byte, p_tag, p_satisfy, p_one_of, p_none_of, p_take, p_is_a, p_is_not,
+    PDigit, PAlpha, PAlphanum, PWs, PDigits, PIdent, PEof, PAny,
+    PHexDigit, PHexDigits, PUint, PInt, PFloat, PQuoted, PLineEnd, PRestLine,
+)
 from ashparser.state     import Ctx, CtxResult
 from ashparser.statecomb import (
     slift, sget, smodify, smap,
@@ -912,6 +918,164 @@ def test_state_new() raises:
     chk("scond False no consume",   r12.rest.input.remaining() == 6)
 
 
+# ── Fluent P wrapper ──────────────────────────────────────────────────────────
+
+def test_fluent() raises:
+    section("Fluent P wrapper")
+
+    # ── __call__ / parse ──────────────────────────────────────────────────────
+    var pd = PDigit()
+    var r1 = pd(Input.from_string(String("5rest")))
+    chk("P __call__ ok",            r1.ok and r1.get() == 53)
+    chk("P __call__ rest",          r1.rest.remaining() == 4)
+    chk("P parse ok",               PDigit().parse("7").ok and PDigit().parse("7").get() == 55)
+    chk("P parse fail",             not PDigit().parse("x").ok)
+
+    # ── Pre-built aliases ─────────────────────────────────────────────────────
+    chk("PAlpha ok",                PAlpha().parse("a").ok)
+    chk("PAlphanum digit",          PAlphanum().parse("9").ok)
+    chk("PWs ok",                   PWs().parse("  \t").ok)
+    chk("PDigits ok",               PDigits().parse("123").ok)
+    chk("PIdent ok",                PIdent().parse("foo_bar").ok)
+    chk("PEof ok",                  PEof().parse("").ok)
+    chk("PAny ok",                  PAny().parse("x").ok)
+    var ru = PUint().parse("42")
+    chk("PUint ok",                 ru.ok and ru.get() == 42)
+    var ri = PInt().parse("-7")
+    chk("PInt ok",                  ri.ok and ri.get() == -7)
+    var rq = PQuoted().parse("\"hi\"")
+    chk("PQuoted ok",               rq.ok and rq.get() == "hi")
+
+    # ── Factory functions ─────────────────────────────────────────────────────
+    chk("p_byte ok",                p_byte[UInt8(44)]().parse(",").ok)
+    chk("p_byte fail",              not p_byte[UInt8(44)]().parse("x").ok)
+    chk("p_tag ok",                 p_tag["hello"]().parse("hello").ok)
+    chk("p_tag fail",               not p_tag["hello"]().parse("world").ok)
+    chk("p_one_of ok",              p_one_of["+-*/"]().parse("+").ok)
+    chk("p_one_of fail",            not p_one_of["+-*/"]().parse("x").ok)
+    chk("p_none_of ok",             p_none_of[",\n"]().parse("x").ok)
+    chk("p_none_of fail",           not p_none_of[",\n"]().parse(",").ok)
+    var rtk = p_take[3]().parse("hello")
+    chk("p_take ok",                rtk.ok and rtk.get() == "hel")
+    chk("p_is_a ok",                p_is_a["0123456789"]().parse("123abc").ok)
+    chk("p_is_not ok",              p_is_not[","]().parse("hello,").ok)
+
+    # ── p_many / p_many1 ──────────────────────────────────────────────────────
+    var rm = PDigit().p_many()
+    var r3 = rm.parse("123abc")
+    chk("p_many ok len=3",          r3.ok and len(r3.get()) == 3)
+    chk("p_many zero ok",           PDigit().p_many().parse("abc").ok)
+    var rm1 = PDigit().p_many1()
+    chk("p_many1 ok",               rm1.parse("42x").ok)
+    chk("p_many1 fail",             not rm1.parse("x").ok)
+
+    # ── p_skip_many / p_skip_many1 ────────────────────────────────────────────
+    chk("p_skip_many ok",           PDigit().p_skip_many().parse("123abc").ok)
+    chk("p_skip_many1 ok",          PDigit().p_skip_many1().parse("456x").ok)
+    chk("p_skip_many1 fail",        not PDigit().p_skip_many1().parse("x").ok)
+
+    # ── p_count ───────────────────────────────────────────────────────────────
+    var rc = PDigit().p_count[3]()
+    chk("p_count ok",               rc.parse("123rest").ok)
+    chk("p_count fail",             not rc.parse("12x").ok)
+
+    # ── p_map ─────────────────────────────────────────────────────────────────
+    @parameter
+    def to_int(b: UInt8) -> Int:
+        return Int(b) - 48
+
+    var rm_int = PDigit().p_map[Int, to_int]()
+    chk("p_map ok",                 rm_int.parse("7").ok and rm_int.parse("7").get() == 7)
+    chk("p_map fail",               not rm_int.parse("x").ok)
+
+    # ── p_verify ──────────────────────────────────────────────────────────────
+    @parameter
+    def is_upper(b: UInt8) -> Bool:
+        return b >= 65 and b <= 90
+
+    chk("p_verify ok",              PAlpha().p_verify[is_upper]().parse("A").ok)
+    chk("p_verify fail",            not PAlpha().p_verify[is_upper]().parse("a").ok)
+
+    # ── p_recognize ───────────────────────────────────────────────────────────
+    var rr_r = PDigit().p_many1().p_recognize().parse("456xyz")
+    chk("p_recognize ok",           rr_r.ok and rr_r.get() == "456")
+    chk("p_recognize rest",         rr_r.rest.remaining() == 3)
+
+    # ── p_attempt / p_peek ────────────────────────────────────────────────────
+    chk("p_attempt ok",             PDigit().p_attempt().parse("5").ok)
+    chk("p_attempt fail",           not PDigit().p_attempt().parse("x").ok)
+    var pk_r = PDigit().p_peek()(Input.from_string(String("5x")))
+    chk("p_peek ok",                pk_r.ok and pk_r.get() == 53)
+    chk("p_peek no consume",        pk_r.rest.remaining() == 2)
+
+    # ── p_then ────────────────────────────────────────────────────────────────
+    # tag["hello"] then ws — returns ws result (whitespace string), discards "hello"
+    var ht = p_tag["hello"]().p_then(PWs())
+    var r5 = ht.parse("hello   x")
+    chk("p_then ok",                r5.ok)
+    chk("p_then rest",              r5.rest.remaining() == 1)
+
+    # ── p_skip ────────────────────────────────────────────────────────────────
+    # digits then comma — returns digits, discards ","
+    var ds = PDigits().p_skip(p_byte[UInt8(44)]())
+    var r6 = ds.parse("123,rest")
+    chk("p_skip ok",                r6.ok and r6.get() == "123")
+    chk("p_skip rest",              r6.rest.remaining() == 4)
+
+    # ── p_between ─────────────────────────────────────────────────────────────
+    # digit inside parens '(' digit ')'
+    var lparen = p_byte[UInt8(40)]()   # '('
+    var rparen = p_byte[UInt8(41)]()   # ')'
+    var pb = PDigit().p_between(lparen, rparen)
+    chk("p_between ok",             pb.parse("(5)").ok and pb.parse("(5)").get() == 53)
+    chk("p_between no left fail",   not pb.parse("5)").ok)
+    chk("p_between no right fail",  not pb.parse("(5").ok)
+
+    # ── p_sep_by / p_sep_by1 ──────────────────────────────────────────────────
+    var comma_p = p_byte[UInt8(44)]()   # ','
+    var sep = PDigit().p_sep_by(comma_p)
+    var r7 = sep.parse("1,2,3")
+    chk("p_sep_by ok len=3",        r7.ok and len(r7.get()) == 3)
+    chk("p_sep_by empty ok",        PDigit().p_sep_by(comma_p).parse("").ok)
+
+    var sep1 = PDigit().p_sep_by1(comma_p)
+    var r7b = sep1.parse("1,2")
+    chk("p_sep_by1 ok len=2",       r7b.ok and len(r7b.get()) == 2)
+    chk("p_sep_by1 fail",           not sep1.parse("x").ok)
+
+    # ── __or__ ────────────────────────────────────────────────────────────────
+    var da = PDigit() | PAlpha()
+    chk("| digit branch",           da.parse("5").ok and da.parse("5").get() == 53)
+    chk("| alpha branch",           da.parse("a").ok and da.parse("a").get() == 97)
+    chk("| both fail",              not da.parse("!").ok)
+
+    # ── p_flat_map ────────────────────────────────────────────────────────────
+    @parameter
+    def pick_by_digit(b: UInt8, rest: Input) -> ParseResult[String]:
+        if b == 49:   # '1' → expect "a"
+            return tag["a"](rest)^
+        return tag["b"](rest)^
+
+    var fm = PDigit().p_flat_map[String, pick_by_digit]()
+    chk("p_flat_map branch 1",      fm.parse("1a").ok and fm.parse("1a").get() == "a")
+    chk("p_flat_map branch 2",      fm.parse("2b").ok and fm.parse("2b").get() == "b")
+    chk("p_flat_map p fail",        not fm.parse("xa").ok)
+    chk("p_flat_map f fail",        not fm.parse("1b").ok)
+
+    # ── Multi-level method chain ───────────────────────────────────────────────
+    # ws → digits → comma: skip leading ws, parse digits, skip trailing comma
+    var chained = PWs().p_then(PDigits()).p_skip(comma_p)
+    var r9 = chained.parse("  42,rest")
+    chk("chain ws+digits+comma ok", r9.ok and r9.get() == "42")
+    chk("chain rest",               r9.rest.remaining() == 4)
+
+    # digits separated by comma → list of strings
+    var csv = PDigits().p_sep_by1(comma_p)
+    var r10 = csv.parse("10,20,30")
+    chk("csv sep ok len=3",         r10.ok and len(r10.get()) == 3)
+    chk("csv second item",          r10.get()[1] == "20")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() raises:
@@ -925,4 +1089,5 @@ def main() raises:
     test_state()
     test_state_new()
     test_integration()
+    test_fluent()
     print("\nAll tests passed.")

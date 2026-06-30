@@ -31,3 +31,9 @@ from ashparser.comb   import (
     count, recognize,
     flat_map, value, fold_many0, fold_many1, cond,
 )
+from ashparser.p import (
+    P,
+    p_byte, p_tag, p_satisfy, p_one_of, p_none_of, p_take, p_is_a, p_is_not,
+    PDigit, PAlpha, PAlphanum, PWs, PDigits, PIdent, PEof, PAny,
+    PHexDigit, PHexDigits, PUint, PInt, PFloat, PQuoted, PLineEnd, PRestLine,
+)
