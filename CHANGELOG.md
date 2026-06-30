@@ -9,6 +9,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### ashllmtools
 #### Added
+- **ashparser integration** — `ashllmtools/ashparser` symlink wires the ashparser
+  combinator library into ashllmtools without touching `pixi.toml`:
+  - `tools/trading/parser.mojo` — new module; `parse_floats_csv` uses
+    `P[Float64, parse_float].p_sep_by(P[UInt8, byte[',']])` (ashparser sep_by +
+    overflow-safe parse_float); `parse_portfolio_line` uses `take_while1` +
+    `parse_float` combinators to replace hand-rolled token extraction;
+    `PortfolioLine` result struct
+  - `tools/trading/indicators.mojo` — `_parse_float_str` (27 lines) and the old
+    `_parse_csv_floats` (17 lines) deleted; replaced by `from tools.trading.parser
+    import parse_floats_csv as _parse_csv_floats`; ashparser's `parse_float` now
+    handles leading `+`, leading `.`, exponent capping, and overflow detection
+  - `tools/trading/portfolio.mojo` — `_read_token`, `_token_end`, `_parse_float_str`
+    helpers deleted; `parse_portfolio` rewritten to call `parse_portfolio_line` per
+    line (ashparser combinator stack: `_PSym → _PWS → _PFlt → _PWS → _PFlt`)
+  - `dsl.mojo` — `parse_facts` now uses ashparser `rest_of_line` + `line_ending`
+    for clean line iteration (was manual byte-by-byte newline scan); `parse_fact`
+    itself kept hand-rolled because the 24-operator leftmost-match logic is
+    non-left-to-right
 - Auto-discovery architecture: `SkillRegistry` now scans `skills/` folder for `.md` files with
   YAML frontmatter (`name:`, `category:`) at startup — no more `_register_builtins()` hardcoding;
   `skills.mojo` reduced to a thin router that dispatches by category to `tools/<cat>/__init__.mojo`

@@ -1,29 +1,11 @@
-"""tools.trading.portfolio — position tracking and P&L analysis."""
+"""tools.trading.portfolio — position tracking and P&L analysis.
 
-from tools.trading.indicators import _parse_float_str, _f2s
+Line parsing uses ashparser via tools.trading.parser.parse_portfolio_line,
+replacing hand-rolled token extraction with combinator-based parsing.
+"""
 
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _read_token(s: String, start: Int) -> String:
-    """Return next whitespace-delimited token starting at or after `start`."""
-    var n   = s.byte_length()
-    var ptr = s.unsafe_ptr()
-    var i   = start
-    while i < n and (ptr[i] == 32 or ptr[i] == 9): i += 1
-    var j = i
-    while j < n and ptr[j] != 32 and ptr[j] != 9 and ptr[j] != 10: j += 1
-    return s[i:j]
-
-
-def _token_end(s: String, start: Int) -> Int:
-    """Byte index immediately past the next token at or after `start`."""
-    var n   = s.byte_length()
-    var ptr = s.unsafe_ptr()
-    var i   = start
-    while i < n and (ptr[i] == 32 or ptr[i] == 9): i += 1
-    while i < n and ptr[i] != 32 and ptr[i] != 9 and ptr[i] != 10: i += 1
-    return i
+from tools.trading.indicators import _f2s
+from tools.trading.parser     import parse_portfolio_line
 
 
 # ── Position / Portfolio ──────────────────────────────────────────────────────
@@ -100,7 +82,7 @@ struct Portfolio(Movable):
 # ── Parser + summary ──────────────────────────────────────────────────────────
 
 def parse_portfolio(text: String) -> Portfolio:
-    """Parse a portfolio from text.
+    """Parse a portfolio from text using ashparser.
 
     Format — one position per line:
         AAPL  100  150.50     # symbol qty cost_basis
@@ -113,31 +95,22 @@ def parse_portfolio(text: String) -> Portfolio:
     var ptr = text.unsafe_ptr()
     var i   = 0
     while i < n:
-        # Find line end
+        # Slice one line
         var j = i
         while j < n and ptr[j] != 10: j += 1
         var line = text[i:j]
         i = j + 1
-        # Trim and skip comments / blank lines
-        var lp = line.unsafe_ptr()
-        var ll = line.byte_length()
-        var s  = 0
+        # Skip blank lines and comments
+        var lp = line.unsafe_ptr(); var ll = line.byte_length(); var s = 0
         while s < ll and (lp[s] == 32 or lp[s] == 9): s += 1
-        if s >= ll or lp[s] == 35:   # empty or '#'
-            continue
-        var sym = _read_token(line, 0)
-        var p1  = _token_end(line, 0)
-        var tok2 = _read_token(line, p1)
-        if sym == "" or tok2 == "":
-            continue
-        var qty  = _parse_float_str(tok2)
-        if sym == "cash":
-            pf.cash = qty
-            continue
-        var p2    = _token_end(line, p1)
-        var tok3  = _read_token(line, p2)
-        var cost  = _parse_float_str(tok3) if tok3 != "" else Float64(0)
-        pf.add(Position(sym, qty, cost))
+        if s >= ll or lp[s] == 35: continue   # empty or '#'
+        # ashparser-based line parse
+        var pl = parse_portfolio_line(line)
+        if not pl.ok: continue
+        if pl.symbol == "cash":
+            pf.cash = pl.qty
+        else:
+            pf.add(Position(pl.symbol, pl.qty, pl.cost_basis))
     return pf
 
 

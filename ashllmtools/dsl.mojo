@@ -1,6 +1,10 @@
 """
 ashllmtools.dsl — compact relational notation for world model and context facts.
 
+Multi-line parsing (parse_facts) uses ashparser for clean line iteration;
+single-fact parsing (parse_fact) is a hand-rolled leftmost-operator scan
+because the 24-operator grammar requires non-left-to-right operator detection.
+
 Operator table (scanned longest-first to avoid prefix ambiguity):
 
   <->   bidirectional relation          a <-> b
@@ -230,19 +234,19 @@ def parse_fact(line: String) -> DSLFact:
 
 
 def parse_facts(text: String) -> List[DSLFact]:
-    """Parse every non-empty, non-comment line in text."""
-    var out   = List[DSLFact]()
-    var n     = text.byte_length()
-    var ptr   = text.unsafe_ptr()
-    var start = 0
-    for i in range(n + 1):
-        if i == n or ptr[i] == 10:
-            if i > start:
-                var line = _trim(text[start:i])
-                # Skip comment lines starting with '#'
-                if line.byte_length() > 0 and line.unsafe_ptr()[0] != 35:
-                    out.append(parse_fact(line))
-            start = i + 1
+    """Parse every non-empty, non-comment line in text using ashparser line iteration."""
+    from ashparser.input import Input
+    from ashparser.prim  import rest_of_line, line_ending
+    var out = List[DSLFact]()
+    var inp = Input.from_string(text)
+    while not inp.is_empty():
+        var r_line = rest_of_line(inp)
+        var line   = _trim(r_line.get()) if r_line.ok else String("")
+        inp = r_line.rest
+        var r_le = line_ending(inp)
+        if r_le.ok: inp = r_le.rest
+        if line.byte_length() == 0 or line.unsafe_ptr()[0] == 35: continue
+        out.append(parse_fact(line))
     return out
 
 

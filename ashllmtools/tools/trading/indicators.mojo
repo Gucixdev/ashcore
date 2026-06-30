@@ -1,49 +1,13 @@
-"""tools.trading.indicators — SMA, EMA, RSI, MACD computed in pure Mojo."""
+"""tools.trading.indicators — SMA, EMA, RSI, MACD computed in pure Mojo.
+
+Float parsing delegates to ashparser (tools.trading.parser) which provides
+overflow-safe, edge-case-correct parse_float via ashparser.prim.
+"""
+
+from tools.trading.parser import parse_floats_csv as _parse_csv_floats
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _parse_float_str(s: String) -> Float64:
-    """Parse a decimal string into Float64."""
-    var n   = s.byte_length()
-    var ptr = s.unsafe_ptr()
-    var i   = 0
-    var sign = Float64(1)
-    if i < n and ptr[i] == 45:   # '-'
-        sign = Float64(-1)
-        i += 1
-    var ip = Float64(0)
-    while i < n and ptr[i] >= 48 and ptr[i] <= 57:
-        ip = ip * Float64(10) + Float64(Int(ptr[i]) - 48)
-        i += 1
-    var fp  = Float64(0)
-    var fdv = Float64(1)
-    if i < n and ptr[i] == 46:   # '.'
-        i += 1
-        while i < n and ptr[i] >= 48 and ptr[i] <= 57:
-            fp  = fp * Float64(10) + Float64(Int(ptr[i]) - 48)
-            fdv = fdv * Float64(10)
-            i += 1
-    return sign * (ip + fp / fdv)
-
-
-def _parse_csv_floats(csv: String) -> List[Float64]:
-    """Parse comma-separated floats (spaces around commas are OK)."""
-    var result = List[Float64]()
-    var n   = csv.byte_length()
-    var ptr = csv.unsafe_ptr()
-    var i   = 0
-    while i < n:
-        while i < n and (ptr[i] == 32 or ptr[i] == 9): i += 1
-        var start = i
-        while i < n and ptr[i] != 44:  # ','
-            i += 1
-        if i > start:
-            var tok = csv[start:i]
-            if tok.byte_length() > 0:
-                result.append(_parse_float_str(tok))
-        i += 1   # skip comma
-    return result
 
 
 def _f2s(f: Float64) -> String:

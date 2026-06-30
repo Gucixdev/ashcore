@@ -7,10 +7,8 @@ To add a new trading skill:
 """
 
 from tools.trading.price      import fetch_quote, fetch_close_csv
-from tools.trading.indicators import (
-    compute_indicator, _parse_csv_floats, _f2s,
-    sma as _sma,
-)
+from tools.trading.indicators import compute_indicator, _f2s, sma as _sma
+from tools.trading.parser     import parse_floats_csv as _parse_csv_floats
 from tools.trading.signals    import detect_signal
 from tools.trading.portfolio  import portfolio_summary
 from decision_contract import _contains
