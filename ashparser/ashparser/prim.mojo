@@ -301,3 +301,154 @@ def quoted_string(inp: Input) -> ParseResult[String]:
         else:
             buf.append(b); pos += 1
     return ParseResult[String].failure(inp, "quoted_string: unterminated string")^
+
+
+# ── any_byte ──────────────────────────────────────────────────────────────────
+
+@parameter
+def any_byte(inp: Input) -> ParseResult[UInt8]:
+    """Consume and return the current byte.  Fails only at EOF."""
+    if inp.is_empty():
+        return ParseResult[UInt8].failure(inp, "any_byte: unexpected EOF")^
+    return ParseResult[UInt8].success(inp.peek(), inp.advance(1))^
+
+
+# ── take[N] ───────────────────────────────────────────────────────────────────
+
+@parameter
+def take[N: Int](inp: Input) -> ParseResult[String]:
+    """Consume exactly N bytes and return them as a String.  Fails if fewer remain."""
+    if inp.remaining() < N:
+        return ParseResult[String].failure(inp, "take: not enough bytes")^
+    return ParseResult[String].success(
+        inp.slice_str(inp.pos, inp.pos + N), inp.at(inp.pos + N)
+    )^
+
+
+# ── is_a / is_not ─────────────────────────────────────────────────────────────
+
+@parameter
+def is_a[chars: StringLiteral](inp: Input) -> ParseResult[String]:
+    """Consume one or more bytes each of which appears in `chars`.
+    Fails if the first byte is not in `chars`."""
+    var n_chars = chars.byte_length()
+    var cp      = chars.unsafe_ptr()
+    var pos     = inp.pos
+    var end     = inp.len
+    var ptr     = inp._ptr()
+    while pos < end:
+        var b     = ptr[pos]
+        var found = False
+        for i in range(n_chars):
+            if cp[i] == b:
+                found = True
+                break
+        if not found:
+            break
+        pos += 1
+    if pos == inp.pos:
+        return ParseResult[String].failure(inp, "is_a: no matching bytes")^
+    return ParseResult[String].success(inp.slice_str(inp.pos, pos), inp.at(pos))^
+
+
+@parameter
+def is_not[chars: StringLiteral](inp: Input) -> ParseResult[String]:
+    """Consume one or more bytes each of which does NOT appear in `chars`.
+    Fails if the first byte IS in `chars` or input is empty."""
+    var n_chars = chars.byte_length()
+    var cp      = chars.unsafe_ptr()
+    var pos     = inp.pos
+    var end     = inp.len
+    var ptr     = inp._ptr()
+    while pos < end:
+        var b     = ptr[pos]
+        var found = False
+        for i in range(n_chars):
+            if cp[i] == b:
+                found = True
+                break
+        if found:
+            break
+        pos += 1
+    if pos == inp.pos:
+        return ParseResult[String].failure(inp, "is_not: no matching bytes")^
+    return ParseResult[String].success(inp.slice_str(inp.pos, pos), inp.at(pos))^
+
+
+# ── take_while_m_n ────────────────────────────────────────────────────────────
+
+@parameter
+def take_while_m_n[MIN: Int, MAX: Int,
+                   pred: def(UInt8) capturing -> Bool](
+    inp: Input) -> ParseResult[String]:
+    """Consume MIN..MAX bytes satisfying pred.  Fails if fewer than MIN match."""
+    var limit = inp.pos + MAX
+    var end   = inp.len if inp.len < limit else limit
+    var pos   = inp.pos
+    var ptr   = inp._ptr()
+    while pos < end:
+        if not pred(ptr[pos]):
+            break
+        pos += 1
+    if pos - inp.pos < MIN:
+        return ParseResult[String].failure(
+            inp, "take_while_m_n: fewer than minimum bytes matched"
+        )^
+    return ParseResult[String].success(inp.slice_str(inp.pos, pos), inp.at(pos))^
+
+
+# ── parse_float ───────────────────────────────────────────────────────────────
+
+@parameter
+def parse_float(inp: Input) -> ParseResult[Float64]:
+    """Parse [-] digits [. digits] [e/E [+/-] digits] into Float64."""
+    var pos = inp.pos
+    var end = inp.len
+    var ptr = inp._ptr()
+    # Optional sign
+    var neg = False
+    if pos < end and ptr[pos] == 45:   # '-'
+        neg = True
+        pos += 1
+    # Integer part — at least one digit required
+    if pos >= end or not _is_digit(ptr[pos]):
+        return ParseResult[Float64].failure(inp, "parse_float: expected digit")^
+    var int_part = Float64(0)
+    while pos < end and _is_digit(ptr[pos]):
+        int_part = int_part * 10.0 + Float64(Int(ptr[pos]) - 48)
+        pos += 1
+    # Fractional part
+    var frac     = Float64(0)
+    var frac_exp = Float64(1)
+    if pos < end and ptr[pos] == 46:   # '.'
+        pos += 1
+        while pos < end and _is_digit(ptr[pos]):
+            frac     = frac * 10.0 + Float64(Int(ptr[pos]) - 48)
+            frac_exp *= 10.0
+            pos      += 1
+    var val = int_part + frac / frac_exp
+    # Exponent
+    if pos < end and (ptr[pos] == 101 or ptr[pos] == 69):   # 'e' or 'E'
+        pos += 1
+        var exp_neg = False
+        if pos < end and ptr[pos] == 45:   # '-'
+            exp_neg = True
+            pos += 1
+        elif pos < end and ptr[pos] == 43:   # '+'
+            pos += 1
+        if pos >= end or not _is_digit(ptr[pos]):
+            return ParseResult[Float64].failure(inp, "parse_float: expected exponent digits")^
+        var exp_val = Int(0)
+        while pos < end and _is_digit(ptr[pos]):
+            exp_val = exp_val * 10 + Int(ptr[pos]) - 48
+            pos += 1
+        var exp_factor = Float64(1)
+        for _ in range(exp_val):
+            exp_factor *= 10.0
+        if exp_neg:
+            val = val / exp_factor
+        else:
+            val = val * exp_factor
+    if neg:
+        val = -val
+    return ParseResult[Float64].success(val, inp.at(pos))^

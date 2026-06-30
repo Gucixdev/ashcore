@@ -65,32 +65,35 @@ struct StreamingInput(Movable, ImplicitlyDeletable):
     the internal buffer. Call your parser immediately; do not store the Input
     across another next_line() / next_chunk() call.
     """
-    var _fd:         Int32
-    var _buf:        UnsafePointer[UInt8]
-    var _chunk_size: Int
-    var _buf_pos:    Int    # current read cursor inside buffer
-    var _buf_len:    Int    # number of valid bytes in buffer
-    var _eof:        Bool
-    var _owned:      Bool   # True when this instance owns fd + buf
+    var _fd:          Int32
+    var _buf:         UnsafePointer[UInt8]
+    var _chunk_size:  Int
+    var _buf_pos:     Int    # current read cursor inside buffer
+    var _buf_len:     Int    # number of valid bytes in buffer
+    var _eof:         Bool
+    var _read_error:  Bool   # True if a read() syscall returned an error
+    var _owned:       Bool   # True when this instance owns fd + buf
 
     def __init__(out self, fd: Int32, buf: UnsafePointer[UInt8], chunk_size: Int):
-        self._fd         = fd
-        self._buf        = buf
-        self._chunk_size = chunk_size
-        self._buf_pos    = 0
-        self._buf_len    = 0
-        self._eof        = False
-        self._owned      = True
+        self._fd          = fd
+        self._buf         = buf
+        self._chunk_size  = chunk_size
+        self._buf_pos     = 0
+        self._buf_len     = 0
+        self._eof         = False
+        self._read_error  = False
+        self._owned       = True
 
     def __moveinit__(out self, owned other: Self):
-        self._fd         = other._fd
-        self._buf        = other._buf
-        self._chunk_size = other._chunk_size
-        self._buf_pos    = other._buf_pos
-        self._buf_len    = other._buf_len
-        self._eof        = other._eof
-        self._owned      = other._owned
-        other._owned     = False   # transfer ownership
+        self._fd          = other._fd
+        self._buf         = other._buf
+        self._chunk_size  = other._chunk_size
+        self._buf_pos     = other._buf_pos
+        self._buf_len     = other._buf_len
+        self._eof         = other._eof
+        self._read_error  = other._read_error
+        self._owned       = other._owned
+        other._owned      = False   # transfer ownership
 
     def __del__(owned self):
         if self._owned:
@@ -103,8 +106,10 @@ struct StreamingInput(Movable, ImplicitlyDeletable):
     def from_file(path: String, chunk_size: Int = 1 << 20) raises -> StreamingInput:
         """
         Open `path` for streaming. chunk_size bytes are held in RAM at a time.
-        Raises if the file cannot be opened.
+        Raises if the file cannot be opened or chunk_size is not positive.
         """
+        if chunk_size <= 0:
+            raise Error("StreamingInput: chunk_size must be > 0")
         # O_RDONLY = 0 on Linux
         var fd = external_call["open", Int32](path.unsafe_ptr(), Int32(0))
         if fd < 0:
@@ -119,6 +124,10 @@ struct StreamingInput(Movable, ImplicitlyDeletable):
     def has_more(self) -> Bool:
         """True if there are unread bytes remaining."""
         return not self._eof or self._buf_pos < self._buf_len
+
+    def has_error(self) -> Bool:
+        """True if a read() syscall returned an error (errno set by OS)."""
+        return self._read_error
 
     # ── Line-by-line API ─────────────────────────────────────────────────────
 
@@ -182,19 +191,26 @@ struct StreamingInput(Movable, ImplicitlyDeletable):
 
     def _fill(mut self):
         """
-        Shift bytes [buf_pos, buf_len) to the front of the buffer, then
-        read up to (chunk_size - leftover) new bytes from the file.
+        Shift bytes [buf_pos, buf_len) to the front of the buffer with memmove,
+        then read up to (chunk_size - leftover) new bytes from the file.
         """
         var leftover = self._buf_len - self._buf_pos
-        # Shift leftover bytes to position 0.
-        for i in range(leftover):
-            self._buf[i] = self._buf[self._buf_pos + i]
+        if leftover > 0 and self._buf_pos > 0:
+            # memmove handles the overlapping-region case correctly.
+            _ = external_call["memmove", UnsafePointer[UInt8]](
+                self._buf, self._buf.offset(self._buf_pos), leftover
+            )
 
         var to_read = self._chunk_size - leftover
         var n = external_call["read", Int](
             self._fd, self._buf.offset(leftover), to_read
         )
-        if n <= 0:
+        if n < 0:
+            # OS-level read error — mark EOF and record the error.
+            self._eof        = True
+            self._read_error = True
+            self._buf_len    = leftover
+        elif n == 0:
             self._eof     = True
             self._buf_len = leftover
         else:

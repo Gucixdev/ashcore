@@ -18,6 +18,7 @@ from ashparser.prim   import (
     hex_digit, hex_digits,
     parse_uint, parse_int,
     quoted_string,
+    any_byte, take, is_a, is_not, take_while_m_n, parse_float,
 )
 from ashparser.comb   import (
     Pair, opt, many, many1, map, choice,
@@ -26,4 +27,5 @@ from ashparser.comb   import (
     peek, not_followed_by,
     verify, skip_many, skip_many1,
     count, recognize,
+    flat_map, value, fold_many0, fold_many1, cond,
 )

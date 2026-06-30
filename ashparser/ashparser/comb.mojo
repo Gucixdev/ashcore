@@ -339,3 +339,106 @@ def recognize[T: Copyable & Movable & ImplicitlyDeletable,
     if not r.ok:
         return ParseResult[String].failure(inp, r.msg)^
     return ParseResult[String].success(inp.slice_str(start, r.rest.pos), r.rest)^
+
+
+# ── flat_map ─────────────────────────────────────────────────────────────────
+
+@parameter
+def flat_map[T: Copyable & Movable & ImplicitlyDeletable,
+             U: Copyable & Movable & ImplicitlyDeletable,
+             p: def(Input) capturing -> ParseResult[T],
+             f: def(T, Input) capturing -> ParseResult[U]](
+    inp: Input) -> ParseResult[U]:
+    """
+    Dependent (monadic) sequencing: run p, then pass its value *and* the
+    remaining input to f.  f may inspect the value to decide how to parse next.
+
+    Example — parse a 1-byte length prefix then exactly that many bytes:
+        @parameter
+        def length_then_payload(n: UInt8, rest: Input) -> ParseResult[String]:
+            return take[Int(n)](rest)^
+        var r = flat_map[UInt8, String, any_byte, length_then_payload](inp)
+    """
+    var r = p(inp)
+    if not r.ok:
+        return ParseResult[U].failure(inp, r.msg)^
+    return f(r.get(), r.rest)^
+
+
+# ── value ─────────────────────────────────────────────────────────────────────
+
+@parameter
+def value[T: Copyable & Movable & ImplicitlyDeletable,
+          V: Copyable & Movable & ImplicitlyDeletable,
+          p: def(Input) capturing -> ParseResult[T]](
+    v: V, inp: Input) -> ParseResult[V]:
+    """Run p; on success return `v` instead of p's own result.
+    Useful for mapping a parser match to a typed constant (enum variant, Bool, etc.)."""
+    var r = p(inp)
+    if not r.ok:
+        return ParseResult[V].failure(inp, r.msg)^
+    return ParseResult[V].success(v, r.rest)^
+
+
+# ── fold_many0 / fold_many1 ───────────────────────────────────────────────────
+
+@parameter
+def fold_many0[T: Copyable & Movable & ImplicitlyDeletable,
+               Acc: Copyable & Movable & ImplicitlyDeletable,
+               p: def(Input) capturing -> ParseResult[T],
+               f: def(Acc, T) capturing -> Acc](
+    init: Acc, inp: Input) -> ParseResult[Acc]:
+    """
+    Apply p zero or more times, folding each result into an accumulator.
+    Always succeeds; returns `init` if p never matches.
+
+    Example — sum all parsed integers:
+        @parameter
+        def add(acc: Int64, n: Int64) -> Int64: return acc + n
+        var r = fold_many0[Int64, Int64, parse_int, add](0, inp)
+    """
+    var acc = init
+    var cur = inp
+    while True:
+        var r = p(cur)
+        if not r.ok:
+            break
+        acc = f(acc, r.get())
+        cur = r.rest
+    return ParseResult[Acc].success(acc, cur)^
+
+
+@parameter
+def fold_many1[T: Copyable & Movable & ImplicitlyDeletable,
+               Acc: Copyable & Movable & ImplicitlyDeletable,
+               p: def(Input) capturing -> ParseResult[T],
+               f: def(Acc, T) capturing -> Acc](
+    init: Acc, inp: Input) -> ParseResult[Acc]:
+    """Like fold_many0 but fails if p does not match at least once."""
+    var r0 = p(inp)
+    if not r0.ok:
+        return ParseResult[Acc].failure(inp, "fold_many1: zero matches")^
+    var acc = f(init, r0.get())
+    var cur = r0.rest
+    while True:
+        var r = p(cur)
+        if not r.ok:
+            break
+        acc = f(acc, r.get())
+        cur = r.rest
+    return ParseResult[Acc].success(acc, cur)^
+
+
+# ── cond ─────────────────────────────────────────────────────────────────────
+
+@parameter
+def cond[T: Copyable & Movable & ImplicitlyDeletable,
+         p: def(Input) capturing -> ParseResult[T]](
+    condition: Bool, inp: Input) -> ParseResult[T]:
+    """
+    Run p only if `condition` is True; otherwise fail without consuming input.
+    Useful for predicate-guarded parsing where the decision is made at runtime.
+    """
+    if not condition:
+        return ParseResult[T].failure(inp, "cond: condition is False")^
+    return p(inp)^

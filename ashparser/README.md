@@ -20,11 +20,14 @@ ashparser/
   sourcemap.mojo  — SourceMap (O(n) build, O(log n) line_col lookup) + LineCol
   prim.mojo       — primitives: satisfy, byte, tag, take_while, digits, ident,
                     one_of, none_of, line_ending, rest_of_line,
-                    hex_digit/hex_digits, parse_uint, parse_int, quoted_string
+                    hex_digit/hex_digits, parse_uint, parse_int, quoted_string,
+                    any_byte, take[N], is_a[chars], is_not[chars],
+                    take_while_m_n[MIN, MAX, pred], parse_float
   comb.mojo       — combinators: opt, many, many1, map, attempt, choice, seq,
                     skip_left, skip_right, between, sep_by, sep_by1,
                     peek, not_followed_by, verify, skip_many, skip_many1,
-                    count, recognize
+                    count, recognize,
+                    flat_map, value, fold_many0, fold_many1, cond
   state.mojo      — Ctx[S] + CtxResult[T,S] for stateful parsing
   statecomb.mojo  — stateful combinators: slift, sget, smodify, smap, sattempt,
                     schoice, smany, smany1, sskip_left, sskip_right,

@@ -13,6 +13,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `StreamingInput` for chunked streaming (RAM = chunk_size, default 1 MB, file size unlimited).
   No changes to existing combinators — `StreamingInput` produces regular `Input` values.
 - `example/stream_csv.mojo` — streaming CSV example (1M rows with O(1 MB) RAM)
+- `prim.mojo` — new primitives: `any_byte`, `take[N]`, `is_a[chars]`, `is_not[chars]`,
+  `take_while_m_n[MIN, MAX, pred]`, `parse_float` (full IEEE-style decimal with exponent)
+- `comb.mojo` — new combinators: `flat_map` (dependent/monadic sequencing),
+  `value` (map match to constant), `fold_many0` / `fold_many1` (accumulating loops),
+  `cond` (predicate-gated parsing)
+
+#### Fixed
+- `fileio.mojo` — `StreamingInput._fill()`: replaced O(n) byte-by-byte leftover shift
+  with a single `memmove` syscall; read() returning -1 (I/O error) now sets `has_error()`
+  instead of being silently treated as EOF; `from_file()` validates `chunk_size > 0`
 
 ---
 
