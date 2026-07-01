@@ -1,4 +1,4 @@
-"""Tests for src/ashcore/debug.mojo."""
+"""Tests for ashcore/debug.mojo."""
 
 from ashcore.debug import (
     DEBUG,

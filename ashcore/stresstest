@@ -22,7 +22,7 @@ _heal_env
 
 mj() {
     local _e _o _rc=0; _e=$(mktemp)
-    _o=$( (cd "$PROJ" && magic run mojo run -I src "$@") 2>"$_e" ) || _rc=$?
+    _o=$( (cd "$PROJ" && magic run mojo run -I . "$@") 2>"$_e" ) || _rc=$?
     [ "$_rc" -eq 0 ] || { cat "$_e" >&2; rm -f "$_e"; return "$_rc"; }
     rm -f "$_e"; printf '%s\n' "$_o"
 }
@@ -86,7 +86,7 @@ stress_wrap() {
 
 stress_debug_guards() {
     hdr "Stress 7 — Debug guards: dbg_assert(False) aborts process"
-    local DEBUG_FILE="$PROJ/src/ashcore/debug.mojo"
+    local DEBUG_FILE="$PROJ/ashcore/debug.mojo"
     sed -i 's/comptime DEBUG: Bool = False/comptime DEBUG: Bool = True/' "$DEBUG_FILE"
     # Verify sed actually changed the file before running (compile error → PASS false positive)
     if ! grep -q "comptime DEBUG: Bool = True" "$DEBUG_FILE"; then

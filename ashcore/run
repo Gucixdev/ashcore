@@ -8,7 +8,7 @@
 #   ./run arena debug  — single suite in debug mode
 set -euo pipefail
 PROJ="$(cd "$(dirname "$0")" && pwd)"
-DEBUG_FILE="$PROJ/src/ashcore/debug.mojo"
+DEBUG_FILE="$PROJ/ashcore/debug.mojo"
 export PATH="$HOME/.local/bin:$PATH"
 
 GREEN='\033[0;32m'; RED='\033[0;31m'; DIM='\033[2m'; BOLD='\033[1m'
@@ -26,7 +26,7 @@ _heal_env
 
 mj() {
     local _e _o _rc=0; _e=$(mktemp)
-    _o=$( (cd "$PROJ" && magic run mojo run -I src "$@") 2>"$_e" ) || _rc=$?
+    _o=$( (cd "$PROJ" && magic run mojo run -I . "$@") 2>"$_e" ) || _rc=$?
     [ "$_rc" -eq 0 ] || { cat "$_e" >&2; rm -f "$_e"; return "$_rc"; }
     rm -f "$_e"; printf '%s\n' "$_o"
 }
