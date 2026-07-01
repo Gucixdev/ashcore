@@ -9,6 +9,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### ashllmtools
 #### Added
+- **GPU acceleration** — `ashcore/gpu.mojo` now implements real GPU kernels via
+  Mojo's `DeviceContext` (stable since MAX 26.x / Mojo 1.0.0b2, confirmed by
+  the `ehsanmok/json` library using the same API):
+  - `has_gpu() -> Bool` — runtime GPU detection via try/except DeviceContext
+  - `_gpu_sma_kernel` — GPU kernel: each thread computes one SMA output value
+    (`output[tid] = mean(prices[tid : tid+period])`); launched with
+    `ctx.enqueue_function` + `grid_dim=ceil(out_n/256)`, `block_dim=256`
+  - `_gpu_abs_diff_kernel` — GPU kernel: each thread computes one absolute
+    bar-to-bar change (`|prices[tid+1] - prices[tid]|`), used by whalecheck
+  - `gpu_map_f64(prices, period)` — host-side launcher: allocates pinned host
+    buffer → H→D copy → SMA kernel → D→H copy → returns `List[Float64]`;
+    falls back to `_cpu_sma` on any exception (no GPU, wrong driver, etc.)
+  - `gpu_abs_diffs(prices)` — same pattern for abs-diff computation
+  - `gpu_parallel_for` kept CPU-only by design (GPU kernels cannot capture
+    arbitrary closures; explanation added to docstring)
+- `ashllmtools/tools/trading/gpu_indicators.mojo` — trading-layer GPU bridge:
+  - `gpu_sma(prices, period)` — delegates to `gpu_map_f64`, CPU fallback
+  - `gpu_sma_csv(prices_csv, period)` — CSV-in / CSV-out entry point for the skill
+  - `gpu_whalecheck(prices)` — GPU abs-diffs + CPU mean/std/threshold;
+    output includes `backend=gpu|cpu` field
+- `tools/trading/__init__.mojo` — `indicator_calc` skill tries GPU SMA first
+  (bare CSV or `indicator: sma` path); `whalecheck` skill delegates entirely to
+  `gpu_whalecheck` so abs-diff loop runs on GPU when available
 - **ashparser integration** — `ashllmtools/ashparser` symlink wires the ashparser
   combinator library into ashllmtools without touching `pixi.toml`:
   - `tools/trading/parser.mojo` — new module; `parse_floats_csv` uses

@@ -6,11 +6,12 @@ To add a new trading skill:
   3. Add one line in dispatch()
 """
 
-from tools.trading.price      import fetch_quote, fetch_close_csv
-from tools.trading.indicators import compute_indicator, _f2s, sma as _sma
-from tools.trading.parser     import parse_floats_csv as _parse_csv_floats
-from tools.trading.signals    import detect_signal
-from tools.trading.portfolio  import portfolio_summary
+from tools.trading.price           import fetch_quote, fetch_close_csv
+from tools.trading.indicators      import compute_indicator, _f2s, sma as _sma
+from tools.trading.parser          import parse_floats_csv as _parse_csv_floats
+from tools.trading.gpu_indicators  import gpu_sma_csv, gpu_whalecheck
+from tools.trading.signals         import detect_signal
+from tools.trading.portfolio       import portfolio_summary
 from decision_contract import _contains
 from skill_types import SkillResult
 
@@ -31,6 +32,26 @@ def _skill_price_fetch(inp: String) -> SkillResult:
 
 def _skill_indicator_calc(inp: String) -> SkillResult:
     if inp == "": return SkillResult.failure("indicator_calc: no input")
+    # GPU fast path: if input is bare CSV + indicator==sma, use GPU SMA
+    if not _contains(inp, "indicator:") or _contains(inp, "indicator: sma"):
+        var csv = inp
+        if _contains(inp, "prices:"):
+            # extract just the csv part for GPU
+            var pk = String("prices:"); var pkl = pk.byte_length(); var pkp = pk.unsafe_ptr()
+            var inp_n = inp.byte_length(); var inp_p = inp.unsafe_ptr()
+            for i in range(inp_n - pkl + 1):
+                var hit = True
+                for j in range(pkl):
+                    if inp_p[i+j] != pkp[j]: hit = False; break
+                if hit:
+                    var k = i + pkl
+                    while k < inp_n and inp_p[k] == 32: k += 1
+                    var end = k
+                    while end < inp_n and inp_p[end] != 32: end += 1
+                    csv = inp[k:end]; break
+        var r = gpu_sma_csv(csv, 10)
+        if not _contains(r, "error:"): return SkillResult.success(r)
+        # fall through to full CPU path
     var prices_csv = inp; var indicator = String("sma"); var period = 10
     var inp_n = inp.byte_length(); var inp_p = inp.unsafe_ptr()
     if _contains(inp, "prices:"):
@@ -150,48 +171,15 @@ def _skill_backtest(inp: String) -> SkillResult:
 
 
 def _skill_whalecheck(inp: String) -> SkillResult:
-    """Detect anomalous price moves (>2.5σ) indicative of large-order whale activity."""
+    """Detect anomalous price moves (>2.5σ) indicative of large-order whale activity.
+
+    abs-diff computation runs on GPU when DeviceContext is available;
+    statistical aggregation (mean/std) runs on CPU.
+    """
     if inp == "": return SkillResult.failure("whalecheck: no price data provided")
-    var prices = _parse_csv_floats(inp); var n = len(prices)
-    if n < 3: return SkillResult.failure("whalecheck: need at least 3 prices")
-    # Compute absolute bar-to-bar changes
-    var changes = List[Float64]()
-    for i in range(1, n):
-        var c = prices[i] - prices[i-1]
-        changes.append(c if c >= Float64(0) else -c)
-    var m = len(changes)
-    # Mean absolute change
-    var mean = Float64(0)
-    for i in range(m): mean += changes[i]
-    mean /= Float64(m)
-    # Population std dev
-    var variance = Float64(0)
-    for i in range(m):
-        var d = changes[i] - mean
-        variance += d * d
-    variance /= Float64(m)
-    # Integer sqrt via Newton's method (20 iterations)
-    var std = variance
-    if std > Float64(0):
-        var x = std
-        for _ in range(20): x = (x + variance / x) * Float64(0.5)
-        std = x
-    var threshold = mean + Float64(2.5) * std
-    var whale_bars = 0; var max_move = Float64(0); var max_price = Float64(0)
-    for i in range(m):
-        if changes[i] > threshold: whale_bars += 1
-        if changes[i] > max_move: max_move = changes[i]; max_price = prices[i + 1]
-    var out = ("whale_analysis: bars=" + String(n)
-               + " mean_move=" + _f2s(mean)
-               + " std_move="  + _f2s(std)
-               + " threshold=" + _f2s(threshold)
-               + "\nwhale_bars=" + String(whale_bars)
-               + " max_move="  + _f2s(max_move)
-               + " at_price="  + _f2s(max_price))
-    if whale_bars > 0:
-        out += "\nalert: " + String(whale_bars) + " whale move(s) detected (>2.5σ)"
-    else:
-        out += "\nno whale activity detected"
+    var prices = _parse_csv_floats(inp)
+    var out = gpu_whalecheck(prices)
+    if _contains(out, "error:"): return SkillResult.failure(out)
     return SkillResult.success(out)
 
 
