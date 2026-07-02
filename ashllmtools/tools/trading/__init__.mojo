@@ -32,7 +32,7 @@ def _kv_token(inp: String, key: String) -> String:
             while k < n and ptr[k] == 32: k += 1
             var end = k
             while end < n and ptr[end] != 32: end += 1
-            return inp[k:end]
+            return String(inp[byte=k:end])
     return String("")
 
 
@@ -53,7 +53,7 @@ def _skill_price_fetch(inp: String) -> SkillResult:
     var n = inp.byte_length(); var ptr = inp.unsafe_ptr(); var lo = 0; var hi = n
     while lo < n and (ptr[lo] == 32 or ptr[lo] == 9): lo += 1
     while hi > lo and (ptr[hi-1] == 32 or ptr[hi-1] == 9): hi -= 1
-    symbol = inp[lo:hi]
+    symbol = String(inp[byte=lo:hi])
     if symbol == "": return SkillResult.failure("price_fetch: no symbol provided")
     var result = fetch_quote(symbol)
     if _contains(result, "error:"): return SkillResult.failure(result)

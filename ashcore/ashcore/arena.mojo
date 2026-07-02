@@ -38,7 +38,9 @@ def _slab_new(n: Int) -> Int:
 def _slab_del(addr: Int):
     """Free a slab by raw address."""
     if addr != 0:
-        UnsafePointer[UInt8, MutAnyOrigin](unsafe_from_address=addr).free()
+        _ = external_call["free", NoneType](
+            UnsafePointer[UInt8, MutAnyOrigin](unsafe_from_address=addr)
+        )
 
 
 # ── ArenaCheckpoint ───────────────────────────────────────────────────────────

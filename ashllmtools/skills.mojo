@@ -36,7 +36,7 @@ def _grep_key(path: String, key: String) -> String:
     var end = n
     while end > skip and (ptr[end-1] == 10 or ptr[end-1] == 13 or ptr[end-1] == 32):
         end -= 1
-    return s[skip:end]
+    return String(s[byte=skip:end])
 
 
 def _scan_skills_folder(base: String) -> List[Skill]:
@@ -49,7 +49,7 @@ def _scan_skills_folder(base: String) -> List[Skill]:
     for i in range(n + 1):
         if i == n or ptr[i] == 10:
             if i > ls:
-                var path = listing[ls:i]
+                var path = String(listing[byte=ls:i])
                 var name = _grep_key(path, "name")
                 var cat  = _grep_key(path, "category")
                 if name != "" and cat != "":

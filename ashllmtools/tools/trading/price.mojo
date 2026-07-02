@@ -25,7 +25,7 @@ def _find_json_value(body: String, key: String) -> String:
             ):
                 k += 1
             if k > start:
-                return body[start:k]
+                return body[byte=start:k]
             break
     return String("")
 
@@ -79,7 +79,7 @@ def fetch_close_csv(symbol: String, days: Int = 60) -> String:
             var csv = String("")
             while k < bl and bp[k] != 93:  # ']'
                 if bp[k] != 32 and bp[k] != 10 and bp[k] != 13:
-                    csv += body[k : k + 1]
+                    csv += String(body[byte=k : k + 1])
                 k += 1
             return csv
     return "error: could not parse close prices for " + symbol

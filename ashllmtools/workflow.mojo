@@ -262,7 +262,7 @@ def load_workflow(name: String) -> String:
     var n = path.byte_length(); var ptr = path.unsafe_ptr(); var end = n
     while end > 0 and (ptr[end-1] == 10 or ptr[end-1] == 13 or ptr[end-1] == 32):
         end -= 1
-    path = path[:end]
+    path = String(path[byte=:end])
     if not file_exists(path):
         return "error: workflow file missing: " + path
     return read_text(path)
@@ -278,7 +278,7 @@ def list_workflows() -> List[String]:
     for i in range(n + 1):
         if i == n or ptr[i] == 10:
             if i > ls:
-                var path = listing[ls:i]
+                var path = String(listing[byte=ls:i])
                 # Extract stem: last '/' to '.md'
                 var pn = path.byte_length(); var pp = path.unsafe_ptr()
                 var slash = 0
@@ -287,6 +287,6 @@ def list_workflows() -> List[String]:
                 var dot = pn
                 if pn >= 3 and pp[pn-3] == 46 and pp[pn-2] == 109 and pp[pn-1] == 100:
                     dot = pn - 3  # strip '.md'
-                if slash < dot: names.append(path[slash:dot])
+                if slash < dot: names.append(String(path[byte=slash:dot]))
             ls = i + 1
     return names

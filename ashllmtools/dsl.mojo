@@ -97,7 +97,7 @@ def _trim(s: String) -> String:
         lo += 1
     while hi > lo and (ptr[hi - 1] == 32 or ptr[hi - 1] == 9):
         hi -= 1
-    return s[lo:hi]
+    return String(s[byte=lo:hi])
 
 
 def _all_ops() -> List[String]:
@@ -209,8 +209,8 @@ def parse_fact(line: String) -> DSLFact:
     if best_op == "":
         return DSLFact.bad(line)
 
-    var lhs = _trim(s[:best_pos])
-    var rhs_raw = _trim(s[best_pos + best_op.byte_length():])
+    var lhs = _trim(String(s[byte=:best_pos]))
+    var rhs_raw = _trim(String(s[byte=best_pos + best_op.byte_length():]))
 
     # Extract trailing (...) from rhs as context
     var rhs = rhs_raw
@@ -227,8 +227,8 @@ def parse_fact(line: String) -> DSLFact:
             if rp[i] == 40:   # '('
                 open_ = i; break
         if open_ >= 0:
-            ctx = rhs_raw[open_ + 1:close]
-            rhs = _trim(rhs_raw[:open_])
+            ctx = String(rhs_raw[byte=open_ + 1:close])
+            rhs = _trim(String(rhs_raw[byte=:open_]))
 
     return DSLFact(lhs=lhs, op=best_op, rhs=rhs, ctx=ctx)
 

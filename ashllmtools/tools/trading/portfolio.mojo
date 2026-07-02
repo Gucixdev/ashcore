@@ -98,7 +98,7 @@ def parse_portfolio(text: String) -> Portfolio:
         # Slice one line
         var j = i
         while j < n and ptr[j] != 10: j += 1
-        var line = text[i:j]
+        var line = String(text[byte=i:j])
         i = j + 1
         # Skip blank lines and comments
         var lp = line.unsafe_ptr(); var ll = line.byte_length(); var s = 0

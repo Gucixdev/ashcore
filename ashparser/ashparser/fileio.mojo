@@ -101,7 +101,7 @@ struct StreamingInput(Movable, ImplicitlyDeletable):
     def __del__(deinit self):
         if self._owned:
             _ = external_call["close", Int32](self._fd)
-            self._buf.free()
+            _ = external_call["free", NoneType](self._buf)
 
     # ── Construction ─────────────────────────────────────────────────────────
 

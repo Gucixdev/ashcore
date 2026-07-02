@@ -10,6 +10,7 @@ Usage:
 
 from tools.trading.parser     import parse_floats_csv
 from tools.trading.indicators import _f2s, sma as _cpu_sma
+from ashcore.gpu import gpu_map_f64, gpu_abs_diffs, has_gpu
 
 
 # ── GPU SMA ───────────────────────────────────────────────────────────────────
@@ -17,7 +18,6 @@ from tools.trading.indicators import _f2s, sma as _cpu_sma
 def gpu_sma(prices: List[Float64], period: Int) -> List[Float64]:
     """SMA via GPU (falls back to CPU if no GPU detected at runtime)."""
     try:
-        from ashcore.gpu import gpu_map_f64
         return gpu_map_f64(prices, period)
     except:
         return _cpu_sma(prices, period)
@@ -57,7 +57,6 @@ def gpu_whalecheck(prices: List[Float64]) -> String:
     # GPU-accelerated abs diffs
     var changes = List[Float64]()
     try:
-        from ashcore.gpu import gpu_abs_diffs
         changes = gpu_abs_diffs(prices)
     except:
         for i in range(1, n):
@@ -91,7 +90,6 @@ def gpu_whalecheck(prices: List[Float64]) -> String:
 
     var backend = String("")
     try:
-        from ashcore.gpu import has_gpu
         backend = " backend=" + ("gpu" if has_gpu() else "cpu")
     except:
         pass
