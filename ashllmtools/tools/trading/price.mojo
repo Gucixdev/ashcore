@@ -25,7 +25,7 @@ def _find_json_value(body: String, key: String) -> String:
             ):
                 k += 1
             if k > start:
-                return body[byte=start:k]
+                return String(body[byte=start:k])
             break
     return String("")
 

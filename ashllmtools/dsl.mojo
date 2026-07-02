@@ -130,7 +130,7 @@ def _all_ops() -> List[String]:
     ops.append("%")
     ops.append("^")
     ops.append("@")
-    return ops
+    return ops^
 
 
 # ── DSLFact ───────────────────────────────────────────────────────────────────

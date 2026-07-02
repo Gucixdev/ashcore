@@ -54,7 +54,7 @@ struct NoteMemory(Movable):
         var result = List[String]()
         for i in range(len(self._notes)):
             result.append(self._notes[i].key)
-        return result
+        return result^
 
     def size(self) -> Int:
         return len(self._notes)

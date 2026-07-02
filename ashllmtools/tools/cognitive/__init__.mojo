@@ -56,7 +56,7 @@ def _skill_reason(inp: String) -> SkillResult:
     return SkillResult.success(
         "sentences=" + String(sentences) + " bytes=" + String(n)
         + " reasoning_type=" + flags
-        + "\nanalysis: " + inp[:cap] + ("..." if n > 80 else "")
+        + "\nanalysis: " + String(inp[byte=:cap]) + ("..." if n > 80 else "")
     )
 
 def _skill_decide(inp: String) -> SkillResult:
@@ -67,7 +67,7 @@ def _skill_decide(inp: String) -> SkillResult:
     for i in range(n):
         if ptr[i] == 10: end = i; break
     var verdict = "proceed" if not risky else "review_first"
-    var out = "decision: " + inp[:end] + "\nverdict=" + verdict
+    var out = "decision: " + String(inp[byte=:end]) + "\nverdict=" + verdict
     if risky: out += "\nwarning: destructive keywords detected"
     return SkillResult.success(out)
 

@@ -111,7 +111,7 @@ def parse_portfolio(text: String) -> Portfolio:
             pf.cash = pl.qty
         else:
             pf.add(Position(pl.symbol, pl.qty, pl.cost_basis))
-    return pf
+    return pf^
 
 
 def portfolio_summary(text: String) -> String:

@@ -18,10 +18,11 @@ concrete function signatures and cannot capture arbitrary closures. Use the
 typed GPU operations (gpu_map_f64, gpu_abs_diffs) for GPU-accelerated work.
 """
 
-from std.atomic    import Atomic
-from std.algorithm import parallelize
-from std.sys       import num_physical_cores
-from memory        import UnsafePointer
+from std.atomic      import Atomic
+from std.algorithm   import parallelize
+from std.sys         import num_physical_cores
+from memory          import UnsafePointer
+from runtime.asyncrt import DeviceContext
 
 
 # ── GPU availability ──────────────────────────────────────────────────────────
@@ -29,7 +30,6 @@ from memory        import UnsafePointer
 def has_gpu() -> Bool:
     """Runtime check — True iff a GPU DeviceContext can be created."""
     try:
-        from runtime.asyncrt import DeviceContext
         _ = DeviceContext()
         return True
     except:
@@ -134,7 +134,6 @@ def gpu_map_f64(
         return List[Float64]()
 
     try:
-        from runtime.asyncrt import DeviceContext
         var ctx   = DeviceContext()
         var out_n = n - period + 1
 
@@ -168,7 +167,7 @@ def gpu_map_f64(
         var h_out_ptr = h_out.unsafe_ptr()
         for i in range(out_n):
             result.append(h_out_ptr[i])
-        return result
+        return result^
 
     except:
         # CPU fallback
@@ -185,7 +184,6 @@ def gpu_abs_diffs(prices: List[Float64]) -> List[Float64]:
         return List[Float64]()
 
     try:
-        from runtime.asyncrt import DeviceContext
         var ctx = DeviceContext()
         var m   = n - 1
 
@@ -213,7 +211,7 @@ def gpu_abs_diffs(prices: List[Float64]) -> List[Float64]:
         var h_ptr  = h_diff.unsafe_ptr()
         for i in range(m):
             result.append(h_ptr[i])
-        return result
+        return result^
 
     except:
         return _cpu_abs_diffs(prices)
@@ -224,12 +222,12 @@ def gpu_abs_diffs(prices: List[Float64]) -> List[Float64]:
 def _cpu_sma(prices: List[Float64], period: Int) -> List[Float64]:
     var result = List[Float64]()
     var n = len(prices)
-    if period <= 0 or period > n: return result
+    if period <= 0 or period > n: return result^
     for i in range(period - 1, n):
         var s = Float64(0)
         for j in range(period): s += prices[i - period + 1 + j]
         result.append(s / Float64(period))
-    return result
+    return result^
 
 
 def _cpu_abs_diffs(prices: List[Float64]) -> List[Float64]:
@@ -237,4 +235,4 @@ def _cpu_abs_diffs(prices: List[Float64]) -> List[Float64]:
     for i in range(1, len(prices)):
         var d = prices[i] - prices[i-1]
         result.append(d if d >= Float64(0) else -d)
-    return result
+    return result^
