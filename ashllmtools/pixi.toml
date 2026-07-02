@@ -6,7 +6,7 @@ platforms = ["linux-64"]
 version = "0.1.0"
 
 [tasks]
-test = "mojo run test_llmtools.mojo"
+test = "mojo run -I . test_llmtools.mojo"
 
 [dependencies]
 max = ">=26.4.0,<27"

@@ -51,7 +51,7 @@ struct Portfolio(Movable):
         var t = Float64(0)
         for i in range(len(self.positions)):
             t += self.positions[i].total_cost()
-        return t
+        return t^
 
     def total_value(self) -> Float64:
         return self.total_invested() + self.cash
@@ -65,7 +65,7 @@ struct Portfolio(Movable):
             out += p.symbol + "_cost = " + _f2s(p.cost_basis) + "\n"
         if self.cash > Float64(0):
             out += "cash = " + _f2s(self.cash) + "\n"
-        return out
+        return out^
 
     def describe(self) -> String:
         var n   = len(self.positions)
@@ -76,7 +76,7 @@ struct Portfolio(Movable):
                    + " total=" + _f2s(self.total_value()) + "\n")
         for i in range(n):
             out += self.positions[i].describe() + "\n"
-        return out
+        return out^
 
 
 # ── Parser + summary ──────────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ def parse_portfolio(text: String) -> Portfolio:
         # Slice one line
         var j = i
         while j < n and ptr[j] != 10: j += 1
-        var line = text[i:j]
+        var line = String(text[byte=i:j])
         i = j + 1
         # Skip blank lines and comments
         var lp = line.unsafe_ptr(); var ll = line.byte_length(); var s = 0
@@ -111,7 +111,7 @@ def parse_portfolio(text: String) -> Portfolio:
             pf.cash = pl.qty
         else:
             pf.add(Position(pl.symbol, pl.qty, pl.cost_basis))
-    return pf
+    return pf^
 
 
 def portfolio_summary(text: String) -> String:
@@ -128,4 +128,4 @@ def portfolio_summary(text: String) -> String:
             var p    = pf.positions[i]
             var pct  = p.total_cost() / inv * Float64(100)
             out += "  " + p.symbol + ": " + _f2s(pct) + "%\n"
-    return out
+    return out^

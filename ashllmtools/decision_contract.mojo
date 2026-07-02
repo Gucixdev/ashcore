@@ -70,12 +70,12 @@ def _contains(haystack: String, needle: String) -> Bool:
     var hp = haystack.unsafe_ptr()
     var np = needle.unsafe_ptr()
     for i in range(hl - nl + 1):
-        var match = True
+        var is_match = True
         for j in range(nl):
             if hp[i + j] != np[j]:
-                match = False
+                is_match = False
                 break
-        if match:
+        if is_match:
             return True
     return False
 
@@ -211,25 +211,3 @@ def evaluate(action: Action) -> GuardResult:
 
     # Step 6: world-sync (hook for WorldModel.sync(); always LOW here)
     return r
-
-
-# ── Public firewall entry point ───────────────────────────────────────────────
-
-def firewall(action: Action) -> GuardResult:
-    """
-    Runtime firewall gate.  MUST be called before every action.
-
-    This is the single entry point for the decision contract.
-    `evaluate()` is the implementation; `firewall()` is the public contract.
-
-    Usage:
-        var g = firewall(Action(cmd="git push origin main", scope="repo"))
-        if g.is_block():
-            return  # action rejected — do NOT proceed
-        # action cleared — proceed
-
-    Callers: SkillRegistry.run(), WorkflowEngine._run_step(), any tool exec.
-    The contract is ENFORCED at the skill layer — it cannot be bypassed by
-    calling skills directly.  It is NOT documentation; it is runtime behavior.
-    """
-    return evaluate(action)

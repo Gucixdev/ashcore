@@ -38,5 +38,5 @@ from ashcore.debug import (
     dbg_power_of_two, dbg_eq, dbg_unreachable
 )
 from ashcore.gpu import (
-    GPU_AVAILABLE, gpu_parallel_for, gpu_info
+    gpu_parallel_for, gpu_info
 )

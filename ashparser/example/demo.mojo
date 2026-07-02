@@ -32,27 +32,6 @@ def _not_quote(b: UInt8) -> Bool:
     return b != 34
 
 @parameter
-def json_null(inp: Input) -> ParseResult[String]:
-    var r = tag["null"](inp)
-    if not r.ok:
-        return ParseResult[String].failure(inp, r.msg)^
-    return ParseResult[String].success(String("null"), r.rest)^
-
-@parameter
-def json_true(inp: Input) -> ParseResult[String]:
-    var r = tag["true"](inp)
-    if not r.ok:
-        return ParseResult[String].failure(inp, r.msg)^
-    return ParseResult[String].success(String("true"), r.rest)^
-
-@parameter
-def json_false(inp: Input) -> ParseResult[String]:
-    var r = tag["false"](inp)
-    if not r.ok:
-        return ParseResult[String].failure(inp, r.msg)^
-    return ParseResult[String].success(String("false"), r.rest)^
-
-@parameter
 def json_num(inp: Input) -> ParseResult[String]:
     return digits(inp)^
 
@@ -69,11 +48,11 @@ def json_str(inp: Input) -> ParseResult[String]:
 
 @parameter
 def json_value(inp: Input) -> ParseResult[String]:
-    var r = json_null(inp)
+    var r = tag["null"](inp)
     if r.ok: return r^
-    var r2 = json_true(inp)
+    var r2 = tag["true"](inp)
     if r2.ok: return r2^
-    var r3 = json_false(inp)
+    var r3 = tag["false"](inp)
     if r3.ok: return r3^
     var r4 = json_num(inp)
     if r4.ok: return r4^

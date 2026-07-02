@@ -16,29 +16,8 @@ def _not_quote(b: UInt8) -> Bool:
     return b != 34
 
 @parameter
-def null_p(inp: Input) -> ParseResult[String]:
-    var r = tag["null"](inp)
-    if not r.ok:
-        return ParseResult[String].failure(inp, r.msg)^
-    return ParseResult[String].success(String("null"), r.rest)^
-
-@parameter
-def true_p(inp: Input) -> ParseResult[String]:
-    var r = tag["true"](inp)
-    if not r.ok:
-        return ParseResult[String].failure(inp, r.msg)^
-    return ParseResult[String].success(String("true"), r.rest)^
-
-@parameter
-def false_p(inp: Input) -> ParseResult[String]:
-    var r = tag["false"](inp)
-    if not r.ok:
-        return ParseResult[String].failure(inp, r.msg)^
-    return ParseResult[String].success(String("false"), r.rest)^
-
-@parameter
 def bool_p(inp: Input) -> ParseResult[String]:
-    return choice[String, true_p, false_p](inp)^
+    return choice[String, tag["true"], tag["false"]](inp)^
 
 @parameter
 def int_p(inp: Input) -> ParseResult[String]:
@@ -57,7 +36,7 @@ def str_p(inp: Input) -> ParseResult[String]:
 
 @parameter
 def value_p(inp: Input) -> ParseResult[String]:
-    var r1 = null_p(inp)
+    var r1 = tag["null"](inp)
     if r1.ok: return r1^
     var r2 = bool_p(inp)
     if r2.ok: return r2^

@@ -26,7 +26,7 @@ _heal_env
 
 mj() {
     local _e _o _rc=0; _e=$(mktemp)
-    _o=$( (cd "$PROJ" && magic run mojo run -I src "$@") 2>"$_e" ) || _rc=$?
+    _o=$( (cd "$PROJ" && magic run mojo run -I . "$@") 2>"$_e" ) || _rc=$?
     [ "$_rc" -eq 0 ] || { cat "$_e" >&2; rm -f "$_e"; return "$_rc"; }
     rm -f "$_e"; printf '%s\n' "$_o"
 }

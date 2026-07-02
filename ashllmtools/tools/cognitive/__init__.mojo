@@ -34,9 +34,9 @@ def _skill_plan(inp: String) -> SkillResult:
     var n = inp.byte_length(); var ptr = inp.unsafe_ptr(); var ls = 0
     for i in range(n):
         if ptr[i] == 10:
-            if i > ls: out += String(step) + ". " + inp[ls:i] + "\n"; step += 1
+            if i > ls: out += String(step) + ". " + String(inp[byte=ls:i]) + "\n"; step += 1
             ls = i + 1
-    if ls < n: out += String(step) + ". " + inp[ls:n] + "\n"; step += 1
+    if ls < n: out += String(step) + ". " + String(inp[byte=ls:n]) + "\n"; step += 1
     if step == 1: out += "1. " + inp + "\n"
     return SkillResult.success(out)
 
@@ -56,7 +56,7 @@ def _skill_reason(inp: String) -> SkillResult:
     return SkillResult.success(
         "sentences=" + String(sentences) + " bytes=" + String(n)
         + " reasoning_type=" + flags
-        + "\nanalysis: " + inp[:cap] + ("..." if n > 80 else "")
+        + "\nanalysis: " + String(inp[byte=:cap]) + ("..." if n > 80 else "")
     )
 
 def _skill_decide(inp: String) -> SkillResult:
@@ -67,7 +67,7 @@ def _skill_decide(inp: String) -> SkillResult:
     for i in range(n):
         if ptr[i] == 10: end = i; break
     var verdict = "proceed" if not risky else "review_first"
-    var out = "decision: " + inp[:end] + "\nverdict=" + verdict
+    var out = "decision: " + String(inp[byte=:end]) + "\nverdict=" + verdict
     if risky: out += "\nwarning: destructive keywords detected"
     return SkillResult.success(out)
 
@@ -79,7 +79,7 @@ def _skill_schedule(inp: String) -> SkillResult:
     for i in range(n + 1):
         if i == n or ptr[i] == 10:
             if i > ls:
-                var l = inp[ls:i]
+                var l = String(inp[byte=ls:i])
                 if _contains(l, "first") or _contains(l, "start") or _contains(l, "init"):
                     early.append(l)
                 elif _contains(l, "after") or _contains(l, "depends") or _contains(l, "then"):

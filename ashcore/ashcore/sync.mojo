@@ -20,7 +20,7 @@ Primitives  (all are valid struct fields; do NOT move after first concurrent use
 from std.atomic import Atomic
 from std.sys   import llvm_intrinsic
 from std.ffi   import external_call
-from ashcore.debug import DEBUG, dbg_assert, dbg_non_negative
+from ashcore.debug import DEBUG, dbg_assert
 
 
 # ---------------------------------------------------------------------------

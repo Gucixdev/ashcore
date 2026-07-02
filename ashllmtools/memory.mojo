@@ -54,7 +54,7 @@ struct NoteMemory(Movable):
         var result = List[String]()
         for i in range(len(self._notes)):
             result.append(self._notes[i].key)
-        return result
+        return result^
 
     def size(self) -> Int:
         return len(self._notes)
@@ -99,14 +99,14 @@ struct EpisodicMemory(Movable):
             start = 0
         for i in range(start, len(self._episodes)):
             result.append(self._episodes[i])
-        return result
+        return result^
 
     def since_turn(self, t: Int) -> List[Episode]:
         var result = List[Episode]()
         for i in range(len(self._episodes)):
             if self._episodes[i].turn >= t:
                 result.append(self._episodes[i])
-        return result
+        return result^
 
     def size(self) -> Int:
         return len(self._episodes)
@@ -114,13 +114,13 @@ struct EpisodicMemory(Movable):
 
 # ── SemanticMemory ────────────────────────────────────────────────────────────
 
-struct SemanticChunk(Copyable, ImplicitlyCopyable, Movable, ImplicitlyDeletable):
+struct SemanticChunk(Copyable, Movable, ImplicitlyDeletable):
     var content: String
     var tags:    List[String]   # keyword tags for retrieval
 
     def __init__(out self, content: String, tags: List[String]):
         self.content = content
-        self.tags    = tags
+        self.tags    = tags.copy()
 
 
 struct SemanticMemory(Movable):
@@ -154,8 +154,8 @@ struct SemanticMemory(Movable):
         var result = List[SemanticChunk]()
         var limit  = top_k if top_k < len(scored) else len(scored)
         for i in range(limit):
-            result.append(self._chunks[scored[i]])
-        return result
+            result.append(self._chunks[scored[i]].copy())
+        return result^
 
     def size(self) -> Int:
         return len(self._chunks)
@@ -192,7 +192,7 @@ struct LongTermMemory(Movable):
             var k = keys[i]
             var v = self.notes.get(k)
             out = out + k + "=" + v + "\n"
-        return out
+        return out^
 
     def describe(self) -> String:
         return (

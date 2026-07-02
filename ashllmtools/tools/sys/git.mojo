@@ -1,4 +1,4 @@
-"""tools.git — lazytools: git state via shell."""
+"""tools.sys.git — lazytools: git state via shell."""
 
 from tools.sys.shell import shell_run, ShellResult
 

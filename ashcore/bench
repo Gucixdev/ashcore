@@ -20,7 +20,7 @@ _heal_env
 
 mj() {
     local _e _o _rc=0; _e=$(mktemp)
-    _o=$( (cd "$PROJ" && magic run mojo run -I src "$@") 2>"$_e" ) || _rc=$?
+    _o=$( (cd "$PROJ" && magic run mojo run -I . "$@") 2>"$_e" ) || _rc=$?
     [ "$_rc" -eq 0 ] || { cat "$_e" >&2; rm -f "$_e"; return "$_rc"; }
     rm -f "$_e"; printf '%s\n' "$_o"
 }
@@ -34,7 +34,7 @@ pct() {
 simd_note() {
     local src=$1
     local bin; bin=$(mktemp /tmp/_ashen_asm_XXXXXX)
-    (cd "$PROJ" && magic run mojo build -I src "$src" -o "$bin") 2>/dev/null || { rm -f "$bin"; return; }
+    (cd "$PROJ" && magic run mojo build -I . "$src" -o "$bin") 2>/dev/null || { rm -f "$bin"; return; }
     local asm; asm=$(objdump -d "$bin" 2>/dev/null)
     local ymm; ymm=$(echo "$asm" | grep -c "[Yy][Mm][Mm]" || true)
     local zmm; zmm=$(echo "$asm" | grep -c "[Zz][Mm][Mm]" || true)

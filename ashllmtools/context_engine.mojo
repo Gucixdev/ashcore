@@ -150,7 +150,7 @@ struct ContextEngine(Movable):
             elif used + c.tokens <= self.budget:
                 out  = out + block
                 used += c.tokens
-        return out
+        return out^
 
     def describe(self) -> String:
         return (

@@ -42,13 +42,13 @@ def sma(prices: List[Float64], period: Int) -> List[Float64]:
     var result = List[Float64]()
     var n = len(prices)
     if period <= 0 or period > n:
-        return result
+        return result^
     for i in range(period - 1, n):
         var s = Float64(0)
         for j in range(period):
             s += prices[i - period + 1 + j]
         result.append(s / Float64(period))
-    return result
+    return result^
 
 
 def ema(prices: List[Float64], period: Int) -> List[Float64]:
@@ -56,7 +56,7 @@ def ema(prices: List[Float64], period: Int) -> List[Float64]:
     var result = List[Float64]()
     var n = len(prices)
     if period <= 0 or period > n:
-        return result
+        return result^
     var seed = Float64(0)
     for i in range(period):
         seed += prices[i]
@@ -66,7 +66,7 @@ def ema(prices: List[Float64], period: Int) -> List[Float64]:
     for i in range(period, n):
         seed = prices[i] * k + seed * (Float64(1) - k)
         result.append(seed)
-    return result
+    return result^
 
 
 def rsi(prices: List[Float64], period: Int = 14) -> List[Float64]:
@@ -74,7 +74,7 @@ def rsi(prices: List[Float64], period: Int = 14) -> List[Float64]:
     var result = List[Float64]()
     var n = len(prices)
     if n <= period:
-        return result
+        return result^
     var avg_gain = Float64(0)
     var avg_loss = Float64(0)
     for i in range(1, period + 1):
@@ -95,7 +95,7 @@ def rsi(prices: List[Float64], period: Int = 14) -> List[Float64]:
         avg_loss = (avg_loss * Float64(period - 1) + loss) / Float64(period)
         rs = avg_gain / avg_loss if avg_loss > Float64(0) else Float64(100)
         result.append(Float64(100) - Float64(100) / (Float64(1) + rs))
-    return result
+    return result^
 
 
 def macd(prices: List[Float64],

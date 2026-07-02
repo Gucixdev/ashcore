@@ -392,7 +392,7 @@ def value[T: Copyable & Movable & ImplicitlyDeletable,
 
 @parameter
 def fold_many0[T: Copyable & Movable & ImplicitlyDeletable,
-               Acc: Copyable & Movable & ImplicitlyDeletable,
+               Acc: Copyable & ImplicitlyCopyable & Movable & ImplicitlyDeletable,
                p: def(Input) capturing -> ParseResult[T],
                f: def(Acc, T) capturing -> Acc](
     init: Acc, inp: Input) -> ParseResult[Acc]:
@@ -420,7 +420,7 @@ def fold_many0[T: Copyable & Movable & ImplicitlyDeletable,
 
 @parameter
 def fold_many1[T: Copyable & Movable & ImplicitlyDeletable,
-               Acc: Copyable & Movable & ImplicitlyDeletable,
+               Acc: Copyable & ImplicitlyCopyable & Movable & ImplicitlyDeletable,
                p: def(Input) capturing -> ParseResult[T],
                f: def(Acc, T) capturing -> Acc](
     init: Acc, inp: Input) -> ParseResult[Acc]:

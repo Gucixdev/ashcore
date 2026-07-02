@@ -40,37 +40,37 @@ struct SharedArena(Movable):
 
     def alloc(
         mut self, size: Int, alignment: Int = CACHE_LINE
-    ) -> UnsafePointer[UInt8, __origin_of(self)]:
+    ) -> UnsafePointer[UInt8, origin_of(self)]:
         self._mu.lock()
         var p = self._arena.alloc(size, alignment)
         self._mu.unlock()
-        return UnsafePointer[UInt8, __origin_of(self)](unsafe_from_address=Int(p))
+        return UnsafePointer[UInt8, origin_of(self)](unsafe_from_address=Int(p))
 
     def alloc_zeroed(
         mut self, size: Int, alignment: Int = CACHE_LINE
-    ) -> UnsafePointer[UInt8, __origin_of(self)]:
+    ) -> UnsafePointer[UInt8, origin_of(self)]:
         self._mu.lock()
         var p = self._arena.alloc_zeroed(size, alignment)
         self._mu.unlock()
-        return UnsafePointer[UInt8, __origin_of(self)](unsafe_from_address=Int(p))
+        return UnsafePointer[UInt8, origin_of(self)](unsafe_from_address=Int(p))
 
     def alloc_simd[dtype: DType, width: Int](
         mut self,
-    ) -> UnsafePointer[Scalar[dtype], __origin_of(self)]:
+    ) -> UnsafePointer[Scalar[dtype], origin_of(self)]:
         self._mu.lock()
         var p = self._arena.alloc_simd[dtype, width]()
         self._mu.unlock()
-        return UnsafePointer[Scalar[dtype], __origin_of(self)](
+        return UnsafePointer[Scalar[dtype], origin_of(self)](
             unsafe_from_address=Int(p)
         )
 
     def copy_str(
         mut self, s: String, alignment: Int = 1
-    ) -> UnsafePointer[UInt8, __origin_of(self)]:
+    ) -> UnsafePointer[UInt8, origin_of(self)]:
         self._mu.lock()
         var p = self._arena.copy_str(s, alignment)
         self._mu.unlock()
-        return UnsafePointer[UInt8, __origin_of(self)](unsafe_from_address=Int(p))
+        return UnsafePointer[UInt8, origin_of(self)](unsafe_from_address=Int(p))
 
     def checkpoint(mut self) -> ArenaCheckpoint:
         self._mu.lock()

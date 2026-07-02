@@ -75,11 +75,6 @@ def close_paren(inp: Input) -> ParseResult[UInt8]:
     return r^
 
 @parameter
-def hi_tag(inp: Input) -> ParseResult[String]:
-    var r = tag["hi"](inp)
-    return r^
-
-@parameter
 def digit_as_int(b: UInt8) -> Int:
     return Int(b) - 48
 
@@ -700,7 +695,7 @@ def test_attempt_sourcemap() raises:
     chk("sourcemap: byte 14 → 3:3",  lc14.line == 3 and lc14.col == 3)
 
     # LineCol.__str__
-    chk("linecol: __str__",           String(lc12) == "3:1")
+    chk("linecol: __str__",           lc12.__str__() == "3:1")
 
     # ── message_ctx_fast ──────────────────────────────────────────────────────
 

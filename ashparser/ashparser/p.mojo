@@ -63,174 +63,174 @@ struct P[T: Copyable & Movable & ImplicitlyDeletable,
     # ── Call / convenience ────────────────────────────────────────────────────
 
     @always_inline
-    def __call__(self, inp: Input) -> ParseResult[T]:
-        return run(inp)^
+    def __call__(self, inp: Input) -> ParseResult[Self.T]:
+        return Self.run(inp)^
 
     @always_inline
-    def parse(self, s: String) -> ParseResult[T]:
+    def parse(self, s: String) -> ParseResult[Self.T]:
         """Parse a String directly — creates Input internally."""
-        return run(Input.from_string(s))^
+        return Self.run(Input.from_string(s))^
 
     # ── Repetition ────────────────────────────────────────────────────────────
 
     @always_inline
-    fn p_many(self) -> P[List[T], many[T, run]]:
+    def p_many(self) -> P[List[Self.T], many[Self.T, Self.run]]:
         """Zero-or-more; always succeeds."""
-        return P[List[T], many[T, run]]()
+        return P[List[Self.T], many[Self.T, Self.run]]()
 
     @always_inline
-    fn p_many1(self) -> P[List[T], many1[T, run]]:
+    def p_many1(self) -> P[List[Self.T], many1[Self.T, Self.run]]:
         """One-or-more; fails on zero matches."""
-        return P[List[T], many1[T, run]]()
+        return P[List[Self.T], many1[Self.T, Self.run]]()
 
     @always_inline
-    fn p_skip_many(self) -> P[UInt8, skip_many[T, run]]:
+    def p_skip_many(self) -> P[UInt8, skip_many[Self.T, Self.run]]:
         """Zero-or-more, discarding results; always succeeds."""
-        return P[UInt8, skip_many[T, run]]()
+        return P[UInt8, skip_many[Self.T, Self.run]]()
 
     @always_inline
-    fn p_skip_many1(self) -> P[UInt8, skip_many1[T, run]]:
+    def p_skip_many1(self) -> P[UInt8, skip_many1[Self.T, Self.run]]:
         """One-or-more, discarding results; fails on zero matches."""
-        return P[UInt8, skip_many1[T, run]]()
+        return P[UInt8, skip_many1[Self.T, Self.run]]()
 
     @always_inline
-    fn p_count[N: Int](self) -> P[List[T], count[T, run, N]]:
+    def p_count[N: Int](self) -> P[List[Self.T], count[Self.T, Self.run, N]]:
         """Exactly N repetitions; backtracks on failure."""
-        return P[List[T], count[T, run, N]]()
+        return P[List[Self.T], count[Self.T, Self.run, N]]()
 
     # ── Transformation ────────────────────────────────────────────────────────
 
     @always_inline
-    fn p_map[U: Copyable & Movable & ImplicitlyDeletable,
-             f: def(T) capturing -> U](self) -> P[U, map[T, U, run, f]]:
+    def p_map[U: Copyable & Movable & ImplicitlyDeletable,
+              f: def(Self.T) capturing -> U](self) -> P[U, map[Self.T, U, Self.run, f]]:
         """Apply f to the parsed value."""
-        return P[U, map[T, U, run, f]]()
+        return P[U, map[Self.T, U, Self.run, f]]()
 
     @always_inline
-    fn p_verify[pred: def(T) capturing -> Bool](
+    def p_verify[pred: def(Self.T) capturing -> Bool](
         self
-    ) -> P[T, verify[T, run, pred]]:
+    ) -> P[Self.T, verify[Self.T, Self.run, pred]]:
         """Fail if pred(value) is False after a successful parse."""
-        return P[T, verify[T, run, pred]]()
+        return P[Self.T, verify[Self.T, Self.run, pred]]()
 
     @always_inline
-    fn p_flat_map[U: Copyable & Movable & ImplicitlyDeletable,
-                  f: def(T, Input) capturing -> ParseResult[U]](
+    def p_flat_map[U: Copyable & Movable & ImplicitlyDeletable,
+                   f: def(Self.T, Input) capturing -> ParseResult[U]](
         self
-    ) -> P[U, flat_map[T, U, run, f]]:
+    ) -> P[U, flat_map[Self.T, U, Self.run, f]]:
         """Dependent sequencing: parse self, then pass (value, rest) to f."""
-        return P[U, flat_map[T, U, run, f]]()
+        return P[U, flat_map[Self.T, U, Self.run, f]]()
 
     @always_inline
-    fn p_recognize(self) -> P[String, recognize[T, run]]:
+    def p_recognize(self) -> P[String, recognize[Self.T, Self.run]]:
         """Return the bytes consumed by self as a String (self's own result is discarded)."""
-        return P[String, recognize[T, run]]()
+        return P[String, recognize[Self.T, Self.run]]()
 
     # ── Control flow ──────────────────────────────────────────────────────────
 
     @always_inline
-    fn p_attempt(self) -> P[T, attempt[T, run]]:
+    def p_attempt(self) -> P[Self.T, attempt[Self.T, Self.run]]:
         """Backtrack to the original position on failure."""
-        return P[T, attempt[T, run]]()
+        return P[Self.T, attempt[Self.T, Self.run]]()
 
     @always_inline
-    fn p_peek(self) -> P[T, peek[T, run]]:
+    def p_peek(self) -> P[Self.T, peek[Self.T, Self.run]]:
         """Match without consuming input (non-destructive lookahead)."""
-        return P[T, peek[T, run]]()
+        return P[Self.T, peek[Self.T, Self.run]]()
 
     # ── Sequential composition ────────────────────────────────────────────────
 
     @always_inline
-    fn p_then[B: Copyable & Movable & ImplicitlyDeletable,
-              q: def(Input) capturing -> ParseResult[B]](
+    def p_then[B: Copyable & Movable & ImplicitlyDeletable,
+               q: def(Input) capturing -> ParseResult[B]](
         self, other: P[B, q]
-    ) -> P[B, skip_left[T, B, run, q]]:
+    ) -> P[B, skip_left[Self.T, B, Self.run, q]]:
         """Run self then other; return other's result (discard self's)."""
-        return P[B, skip_left[T, B, run, q]]()
+        return P[B, skip_left[Self.T, B, Self.run, q]]()
 
     @always_inline
-    fn p_skip[B: Copyable & Movable & ImplicitlyDeletable,
-              q: def(Input) capturing -> ParseResult[B]](
+    def p_skip[B: Copyable & Movable & ImplicitlyDeletable,
+               q: def(Input) capturing -> ParseResult[B]](
         self, other: P[B, q]
-    ) -> P[T, skip_right[T, B, run, q]]:
+    ) -> P[Self.T, skip_right[Self.T, B, Self.run, q]]:
         """Run self then other; return self's result (discard other's)."""
-        return P[T, skip_right[T, B, run, q]]()
+        return P[Self.T, skip_right[Self.T, B, Self.run, q]]()
 
     @always_inline
-    fn p_between[L: Copyable & Movable & ImplicitlyDeletable,
-                 R: Copyable & Movable & ImplicitlyDeletable,
-                 lp: def(Input) capturing -> ParseResult[L],
-                 rp: def(Input) capturing -> ParseResult[R]](
+    def p_between[L: Copyable & Movable & ImplicitlyDeletable,
+                  R: Copyable & Movable & ImplicitlyDeletable,
+                  lp: def(Input) capturing -> ParseResult[L],
+                  rp: def(Input) capturing -> ParseResult[R]](
         self, left: P[L, lp], right: P[R, rp]
-    ) -> P[T, between[L, T, R, lp, run, rp]]:
+    ) -> P[Self.T, between[L, Self.T, R, lp, Self.run, rp]]:
         """Parse left self right; return self's result (discard delimiters)."""
-        return P[T, between[L, T, R, lp, run, rp]]()
+        return P[Self.T, between[L, Self.T, R, lp, Self.run, rp]]()
 
     @always_inline
-    fn p_sep_by[S: Copyable & Movable & ImplicitlyDeletable,
-                sep: def(Input) capturing -> ParseResult[S]](
-        self, separator: P[S, sep]
-    ) -> P[List[T], sep_by[T, S, run, sep]]:
-        """Zero-or-more self separated by separator; always succeeds."""
-        return P[List[T], sep_by[T, S, run, sep]]()
-
-    @always_inline
-    fn p_sep_by1[S: Copyable & Movable & ImplicitlyDeletable,
+    def p_sep_by[S: Copyable & Movable & ImplicitlyDeletable,
                  sep: def(Input) capturing -> ParseResult[S]](
         self, separator: P[S, sep]
-    ) -> P[List[T], sep_by1[T, S, run, sep]]:
+    ) -> P[List[Self.T], sep_by[Self.T, S, Self.run, sep]]:
+        """Zero-or-more self separated by separator; always succeeds."""
+        return P[List[Self.T], sep_by[Self.T, S, Self.run, sep]]()
+
+    @always_inline
+    def p_sep_by1[S: Copyable & Movable & ImplicitlyDeletable,
+                  sep: def(Input) capturing -> ParseResult[S]](
+        self, separator: P[S, sep]
+    ) -> P[List[Self.T], sep_by1[Self.T, S, Self.run, sep]]:
         """One-or-more self separated by separator; fails on zero matches."""
-        return P[List[T], sep_by1[T, S, run, sep]]()
+        return P[List[Self.T], sep_by1[Self.T, S, Self.run, sep]]()
 
     # ── Choice ────────────────────────────────────────────────────────────────
 
     @always_inline
-    fn __or__[q: def(Input) capturing -> ParseResult[T]](
-        self, other: P[T, q]
-    ) -> P[T, choice[T, run, q]]:
+    def __or__[q: def(Input) capturing -> ParseResult[Self.T]](
+        self, other: P[Self.T, q]
+    ) -> P[Self.T, choice[Self.T, Self.run, q]]:
         """Try self; on failure try other on the same input."""
-        return P[T, choice[T, run, q]]()
+        return P[Self.T, choice[Self.T, Self.run, q]]()
 
 
 # ── Factory functions ─────────────────────────────────────────────────────────
 
 @always_inline
-fn p_byte[B: UInt8]() -> P[UInt8, byte[B]]:
+def p_byte[B: UInt8]() -> P[UInt8, byte[B]]:
     """Parser for exact byte B."""
     return P[UInt8, byte[B]]()
 
 @always_inline
-fn p_tag[s: StringLiteral]() -> P[String, tag[s]]:
+def p_tag[s: StringLiteral]() -> P[String, tag[s]]:
     """Parser for exact string literal s."""
     return P[String, tag[s]]()
 
 @always_inline
-fn p_satisfy[pred: def(UInt8) capturing -> Bool]() -> P[UInt8, satisfy[pred]]:
+def p_satisfy[pred: def(UInt8) capturing -> Bool]() -> P[UInt8, satisfy[pred]]:
     """Parser consuming one byte satisfying pred."""
     return P[UInt8, satisfy[pred]]()
 
 @always_inline
-fn p_one_of[chars: StringLiteral]() -> P[UInt8, one_of[chars]]:
+def p_one_of[chars: StringLiteral]() -> P[UInt8, one_of[chars]]:
     """Parser consuming a byte that appears in chars."""
     return P[UInt8, one_of[chars]]()
 
 @always_inline
-fn p_none_of[chars: StringLiteral]() -> P[UInt8, none_of[chars]]:
+def p_none_of[chars: StringLiteral]() -> P[UInt8, none_of[chars]]:
     """Parser consuming a byte not in chars."""
     return P[UInt8, none_of[chars]]()
 
 @always_inline
-fn p_take[N: Int]() -> P[String, take[N]]:
+def p_take[N: Int]() -> P[String, take[N]]:
     """Parser consuming exactly N bytes as a String."""
     return P[String, take[N]]()
 
 @always_inline
-fn p_is_a[chars: StringLiteral]() -> P[String, is_a[chars]]:
+def p_is_a[chars: StringLiteral]() -> P[String, is_a[chars]]:
     """Parser consuming one or more bytes each present in chars."""
     return P[String, is_a[chars]]()
 
 @always_inline
-fn p_is_not[chars: StringLiteral]() -> P[String, is_not[chars]]:
+def p_is_not[chars: StringLiteral]() -> P[String, is_not[chars]]:
     """Parser consuming one or more bytes each absent from chars."""
     return P[String, is_not[chars]]()
 

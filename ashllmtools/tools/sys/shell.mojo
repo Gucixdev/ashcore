@@ -1,9 +1,9 @@
-"""tools.shell — lazytools: shell command execution via popen."""
+"""tools.sys.shell — lazytools: shell command execution via popen."""
 
 from std.ffi import external_call
 from std.memory import UnsafePointer
 
-alias _FPTR = UnsafePointer[UInt8]   # opaque FILE*
+alias _FPTR = UnsafePointer[UInt8, MutAnyOrigin]   # opaque FILE*
 
 comptime _BUF: Int = 4096
 
@@ -25,7 +25,7 @@ def shell_run(cmd: String) -> ShellResult:
     if Int(fp) == 0:
         return ShellResult("", False)
 
-    var buf = UnsafePointer[UInt8].alloc(_BUF)
+    var buf = external_call["malloc", UnsafePointer[UInt8, MutAnyOrigin]](_BUF)
     var acc = List[UInt8]()
     while True:
         var n = external_call["fread", Int](buf, Int(1), Int(_BUF), fp)
@@ -33,7 +33,7 @@ def shell_run(cmd: String) -> ShellResult:
             break
         for i in range(n):
             acc.append(buf[i])
-    buf.free()
+    _ = external_call["free", NoneType](buf)
     _ = external_call["pclose", Int32](fp)
 
     if len(acc) == 0:

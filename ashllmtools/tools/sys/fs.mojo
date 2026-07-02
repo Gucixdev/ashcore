@@ -1,8 +1,8 @@
-"""tools.fs — lazytools: filesystem read/write/exist/list/tree/info/scan_log."""
+"""tools.sys.fs — lazytools: filesystem read/write/exist/list/tree/info/scan_log."""
 
-from pathlib import Path
+from std.pathlib import Path
 from std.memory import UnsafePointer
-from tools.shell import shell_run
+from tools.sys.shell import shell_run
 
 
 def file_exists(path: String) -> Bool:
@@ -28,7 +28,7 @@ def list_dir(path: String) -> List[String]:
     var r = shell_run("ls -1 " + path + " 2>/dev/null")
     var result = List[String]()
     if not r.ok or r.stdout == "":
-        return result
+        return result^
     var s = r.stdout
     var ptr = s.unsafe_ptr()
     var start = 0
@@ -39,7 +39,7 @@ def list_dir(path: String) -> List[String]:
             start = i + 1
     if start < s.byte_length():
         result.append(String(StringSlice(ptr=ptr + start, length=s.byte_length() - start)))
-    return result
+    return result^
 
 
 def show_tree(path: String, max_depth: Int = 3) -> String:
@@ -85,7 +85,7 @@ def file_info(path: String) -> String:
         if len(parts) >= 1:
             out = out + "disk_usage=" + parts[0] + "\n"
 
-    return out
+    return out^
 
 
 def system_info() -> String:
@@ -222,4 +222,4 @@ def _split_tab(s: String) -> List[String]:
             start = i + 1
     if start < bl:
         result.append(String(StringSlice(ptr=ptr + start, length=bl - start)))
-    return result
+    return result^

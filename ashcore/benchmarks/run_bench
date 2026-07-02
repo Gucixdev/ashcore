@@ -35,7 +35,7 @@ ns_to_us() { printf "%.0f ns" "$1"; }
 # Run a Mojo benchmark file, return stdout; show errors on failure
 mojo_run() {
     local _e _o _rc=0; _e=$(mktemp)
-    _o=$( (cd "$PROJ_DIR" && magic run mojo run -I src "$BENCH_DIR/$1") 2>"$_e" ) || _rc=$?
+    _o=$( (cd "$PROJ_DIR" && magic run mojo run -I . "$BENCH_DIR/$1") 2>"$_e" ) || _rc=$?
     [ "$_rc" -eq 0 ] || { cat "$_e" >&2; rm -f "$_e"; return "$_rc"; }
     rm -f "$_e"; printf '%s\n' "$_o"
 }
@@ -58,7 +58,7 @@ py_run() { python3 "$BENCH_DIR/$1" 2>/dev/null; }
 asm_probe() {
     local mj_src=$1
     local bin; bin=$(mktemp /tmp/_ashen_asm_XXXXXX)
-    (cd "$PROJ_DIR" && magic run mojo build -I src "$BENCH_DIR/$mj_src" -o "$bin") 2>/dev/null \
+    (cd "$PROJ_DIR" && magic run mojo build -I . "$BENCH_DIR/$mj_src" -o "$bin") 2>/dev/null \
         || { rm -f "$bin"; return; }
     local asm; asm=$(objdump -d "$bin" 2>/dev/null)
     local ymm; ymm=$(echo "$asm" | grep -c "[Yy][Mm][Mm]" || true)

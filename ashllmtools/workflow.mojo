@@ -19,8 +19,8 @@ Exit conditions:
 """
 
 from decision_contract import Action, GuardResult, evaluate
-from decision_contract import RISK_BLOCK, RISK_HIGH, RISK_LOW
-from decision_contract import risk_name, _contains
+from decision_contract import RISK_BLOCK
+from decision_contract import _contains
 from skills import SkillRegistry
 from skill_types import SkillResult
 from tools.sys.shell import shell_run
@@ -47,7 +47,7 @@ def ts_name(s: Int) -> String:
 
 # ── Task ──────────────────────────────────────────────────────────────────────
 
-struct Task(Copyable, ImplicitlyCopyable, Movable, ImplicitlyDeletable):
+struct Task(Copyable, Movable, ImplicitlyDeletable):
     """
     A single unit of work within a workflow.
     deps: list of task IDs that must be DONE before this task can start.
@@ -155,7 +155,7 @@ struct WorkflowEngine(Movable):
             return StepResult(LOOP_BLOCKED, "no unblocked tasks available")
 
         # Step 4: CONTRACT
-        var t   = self.tasks[task_idx]
+        var t   = self.tasks[task_idx].copy()
         var act = Action(
             cmd        = t.skill + ": " + t.desc,
             scope      = "repo",
@@ -262,7 +262,7 @@ def load_workflow(name: String) -> String:
     var n = path.byte_length(); var ptr = path.unsafe_ptr(); var end = n
     while end > 0 and (ptr[end-1] == 10 or ptr[end-1] == 13 or ptr[end-1] == 32):
         end -= 1
-    path = path[:end]
+    path = String(path[byte=:end])
     if not file_exists(path):
         return "error: workflow file missing: " + path
     return read_text(path)
@@ -278,7 +278,7 @@ def list_workflows() -> List[String]:
     for i in range(n + 1):
         if i == n or ptr[i] == 10:
             if i > ls:
-                var path = listing[ls:i]
+                var path = String(listing[byte=ls:i])
                 # Extract stem: last '/' to '.md'
                 var pn = path.byte_length(); var pp = path.unsafe_ptr()
                 var slash = 0
@@ -287,6 +287,6 @@ def list_workflows() -> List[String]:
                 var dot = pn
                 if pn >= 3 and pp[pn-3] == 46 and pp[pn-2] == 109 and pp[pn-1] == 100:
                     dot = pn - 3  # strip '.md'
-                if slash < dot: names.append(path[slash:dot])
+                if slash < dot: names.append(String(path[byte=slash:dot]))
             ls = i + 1
-    return names
+    return names^

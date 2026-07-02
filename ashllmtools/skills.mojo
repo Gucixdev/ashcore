@@ -36,26 +36,26 @@ def _grep_key(path: String, key: String) -> String:
     var end = n
     while end > skip and (ptr[end-1] == 10 or ptr[end-1] == 13 or ptr[end-1] == 32):
         end -= 1
-    return s[skip:end]
+    return String(s[byte=skip:end])
 
 
 def _scan_skills_folder(base: String) -> List[Skill]:
     """Walk base/ for *.md files, extract name/category from YAML frontmatter."""
     var skills = List[Skill]()
     var r = shell_run("find " + base + " -name '*.md' -type f | sort 2>/dev/null")
-    if not r.ok or r.stdout == "": return skills
+    if not r.ok or r.stdout == "": return skills^
     var listing = r.stdout
     var n = listing.byte_length(); var ptr = listing.unsafe_ptr(); var ls = 0
     for i in range(n + 1):
         if i == n or ptr[i] == 10:
             if i > ls:
-                var path = listing[ls:i]
+                var path = String(listing[byte=ls:i])
                 var name = _grep_key(path, "name")
                 var cat  = _grep_key(path, "category")
                 if name != "" and cat != "":
                     skills.append(Skill(name=name, desc="", category=cat))
             ls = i + 1
-    return skills
+    return skills^
 
 
 # ── SkillRegistry ─────────────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ struct SkillRegistry(Movable):
     def list(self) -> List[String]:
         var names = List[String]()
         for i in range(len(self._skills)): names.append(self._skills[i].name)
-        return names
+        return names^
 
     def find(self, name: String) -> Bool:
         for i in range(len(self._skills)):

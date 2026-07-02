@@ -18,7 +18,6 @@ Freshness thresholds:
   web results  → 900 seconds  (15 minutes)
 """
 
-from std.memory import UnsafePointer
 from tools.sys.fs    import read_text, file_exists
 from tools.sys.shell import shell_run
 from context_engine import ContextChunk, AUTH_REPO, AUTH_FETCHED, AUTH_WEB
@@ -134,11 +133,11 @@ struct RAGPipeline(Movable):
         for i in range(len(self._docs)):
             if self._docs[i].is_fresh():
                 fresh.append(self._docs[i])
-        return fresh
+        return fresh^
 
     def _rank(self, docs: List[Document]) -> List[Document]:
         """Insertion sort by authority ascending (lower = more trusted)."""
-        var sorted = docs
+        var sorted = docs.copy()
         var n = len(sorted)
         for i in range(1, n):
             var key = sorted[i]
@@ -147,7 +146,7 @@ struct RAGPipeline(Movable):
                 sorted[j + 1] = sorted[j]
                 j -= 1
             sorted[j + 1] = key
-        return sorted
+        return sorted^
 
     def _compress(self, doc: Document) -> Document:
         """Truncate documents exceeding max_bytes with a notice."""
@@ -174,7 +173,7 @@ struct RAGPipeline(Movable):
         for i in range(limit):
             var compressed = self._compress(ranked[i])
             result.append(compressed.to_chunk())
-        return result
+        return result^
 
     def size(self) -> Int:
         return len(self._docs)

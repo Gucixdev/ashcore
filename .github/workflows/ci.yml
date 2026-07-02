@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ashcore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: ashcore
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          manifest-path: ashcore/pixi.toml
+          cache: true
+
+      - name: Shim magic -> pixi
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          printf '#!/usr/bin/env bash\nexec pixi "$@"\n' > "$HOME/.local/bin/magic"
+          chmod +x "$HOME/.local/bin/magic"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run tests
+        run: ./test run
+
+      - name: Debug crash symbolication (test_debug.mojo)
+        if: failure()
+        run: |
+          pixi run mojo build -I . -debug-level=line-tables tests/test_debug.mojo -o /tmp/test_debug_dbg || true
+          /tmp/test_debug_dbg || true
+
+  ashparser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: ashparser
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          manifest-path: ashparser/pixi.toml
+          cache: true
+
+      - name: Shim magic -> pixi
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          printf '#!/usr/bin/env bash\nexec pixi "$@"\n' > "$HOME/.local/bin/magic"
+          chmod +x "$HOME/.local/bin/magic"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run tests
+        run: ./test run
+
+  ashllmtools:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: ashllmtools
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          manifest-path: ashllmtools/pixi.toml
+          cache: false
+          locked: false
+
+      - name: Run tests
+        run: pixi run test

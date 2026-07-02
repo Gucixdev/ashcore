@@ -1,4 +1,4 @@
-"""Tests for src/ashcore/debug.mojo."""
+"""Tests for ashcore/debug.mojo."""
 
 from ashcore.debug import (
     DEBUG,
@@ -54,11 +54,10 @@ def test_guards_pass() raises:
     dbg_eq(42, 42, "test")
     ok("dbg_eq(42, 42) no-op")
 
-    if not DEBUG:
-        dbg_unreachable("should not fire in release")
-        ok("dbg_unreachable no-op in release")
-    else:
-        ok("dbg_unreachable → SKIPPED (always aborts in debug — correct)")
+    # dbg_unreachable always traps (llvm.trap in release, abort() in debug —
+    # see debug.mojo) so it can't be exercised inline without killing the
+    # test process; nothing to call here in either mode.
+    ok("dbg_unreachable → SKIPPED (always traps/aborts by design)")
     print()
 
 

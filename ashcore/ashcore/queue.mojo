@@ -24,6 +24,7 @@ to embed a 16-bit type tag and 48-bit payload in a single word:
     var pay = event_payload(raw)
 """
 
+from std.atomic    import Atomic
 from ashcore.sync  import TicketLock
 from ashcore.debug import DEBUG, dbg_assert
 
@@ -66,9 +67,6 @@ struct PopResult:
 
 
 # ── SPSC ring buffer ────────────────────────────────────────────────────────
-
-from std.atomic import Atomic
-
 
 struct SPSCQueue:
     """

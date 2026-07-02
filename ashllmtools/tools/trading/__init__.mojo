@@ -16,6 +16,36 @@ from decision_contract import _contains
 from skill_types import SkillResult
 
 
+# ── Argument parsing helpers ──────────────────────────────────────────────────
+
+def _kv_token(inp: String, key: String) -> String:
+    """Find 'key' in inp, skip spaces after it, return the token up to the
+    next space. Empty string if key is not present."""
+    var n = inp.byte_length(); var ptr = inp.unsafe_ptr()
+    var kl = key.byte_length(); var kp = key.unsafe_ptr()
+    for i in range(n - kl + 1):
+        var hit = True
+        for j in range(kl):
+            if ptr[i+j] != kp[j]: hit = False; break
+        if hit:
+            var k = i + kl
+            while k < n and ptr[k] == 32: k += 1
+            var end = k
+            while end < n and ptr[end] != 32: end += 1
+            return String(inp[byte=k:end])
+    return String("")
+
+
+def _kv_int(inp: String, key: String, default: Int) -> Int:
+    """_kv_token(inp, key) parsed as a positive integer, or default if
+    the key is absent or the token has no digits."""
+    var tok = _kv_token(inp, key)
+    var pp = tok.unsafe_ptr(); var pv = 0
+    for ci in range(tok.byte_length()):
+        if pp[ci] >= 48 and pp[ci] <= 57: pv = pv * 10 + Int(pp[ci]) - 48
+    return pv if pv > 0 else default
+
+
 # ── Skill implementations ─────────────────────────────────────────────────────
 
 def _skill_price_fetch(inp: String) -> SkillResult:
@@ -23,7 +53,7 @@ def _skill_price_fetch(inp: String) -> SkillResult:
     var n = inp.byte_length(); var ptr = inp.unsafe_ptr(); var lo = 0; var hi = n
     while lo < n and (ptr[lo] == 32 or ptr[lo] == 9): lo += 1
     while hi > lo and (ptr[hi-1] == 32 or ptr[hi-1] == 9): hi -= 1
-    symbol = inp[lo:hi]
+    symbol = String(inp[byte=lo:hi])
     if symbol == "": return SkillResult.failure("price_fetch: no symbol provided")
     var result = fetch_quote(symbol)
     if _contains(result, "error:"): return SkillResult.failure(result)
@@ -34,63 +64,13 @@ def _skill_indicator_calc(inp: String) -> SkillResult:
     if inp == "": return SkillResult.failure("indicator_calc: no input")
     # GPU fast path: if input is bare CSV + indicator==sma, use GPU SMA
     if not _contains(inp, "indicator:") or _contains(inp, "indicator: sma"):
-        var csv = inp
-        if _contains(inp, "prices:"):
-            # extract just the csv part for GPU
-            var pk = String("prices:"); var pkl = pk.byte_length(); var pkp = pk.unsafe_ptr()
-            var inp_n = inp.byte_length(); var inp_p = inp.unsafe_ptr()
-            for i in range(inp_n - pkl + 1):
-                var hit = True
-                for j in range(pkl):
-                    if inp_p[i+j] != pkp[j]: hit = False; break
-                if hit:
-                    var k = i + pkl
-                    while k < inp_n and inp_p[k] == 32: k += 1
-                    var end = k
-                    while end < inp_n and inp_p[end] != 32: end += 1
-                    csv = inp[k:end]; break
+        var csv = _kv_token(inp, "prices:") if _contains(inp, "prices:") else inp
         var r = gpu_sma_csv(csv, 10)
         if not _contains(r, "error:"): return SkillResult.success(r)
         # fall through to full CPU path
-    var prices_csv = inp; var indicator = String("sma"); var period = 10
-    var inp_n = inp.byte_length(); var inp_p = inp.unsafe_ptr()
-    if _contains(inp, "prices:"):
-        var key = String("prices:"); var kl = key.byte_length(); var kp = key.unsafe_ptr()
-        for i in range(inp_n - kl + 1):
-            var hit = True
-            for j in range(kl):
-                if inp_p[i+j] != kp[j]: hit = False; break
-            if hit:
-                var k = i + kl
-                while k < inp_n and inp_p[k] == 32: k += 1
-                var end = k
-                while end < inp_n and inp_p[end] != 32: end += 1
-                prices_csv = inp[k:end]; break
-        var key2 = String(" indicator:"); var k2l = key2.byte_length(); var k2p = key2.unsafe_ptr()
-        for i in range(inp_n - k2l + 1):
-            var hit = True
-            for j in range(k2l):
-                if inp_p[i+j] != k2p[j]: hit = False; break
-            if hit:
-                var k = i + k2l
-                while k < inp_n and inp_p[k] == 32: k += 1
-                var end = k
-                while end < inp_n and inp_p[end] != 32: end += 1
-                indicator = inp[k:end]; break
-        var key3 = String(" period:"); var k3l = key3.byte_length(); var k3p = key3.unsafe_ptr()
-        for i in range(inp_n - k3l + 1):
-            var hit = True
-            for j in range(k3l):
-                if inp_p[i+j] != k3p[j]: hit = False; break
-            if hit:
-                var k = i + k3l
-                while k < inp_n and inp_p[k] == 32: k += 1
-                var end = k
-                while end < inp_n and inp_p[end] != 32: end += 1
-                var tok = inp[k:end]; var pp = tok.unsafe_ptr(); var pv = 0
-                for ci in range(tok.byte_length()):
-                    if pp[ci] >= 48 and pp[ci] <= 57: pv = pv * 10 + Int(pp[ci]) - 48
-                if pv > 0: period = pv; break
+    var prices_csv = _kv_token(inp, "prices:") if _contains(inp, "prices:") else inp
+    var indicator  = _kv_token(inp, " indicator:") if _contains(inp, " indicator:") else String("sma")
+    var period     = _kv_int(inp, " period:", 10)
     var result = compute_indicator(prices_csv, indicator, period)
     if _contains(result, "error:"): return SkillResult.failure(result)
     return SkillResult.success(result)
@@ -112,43 +92,9 @@ def _skill_portfolio_analyze(inp: String) -> SkillResult:
 
 def _skill_backtest(inp: String) -> SkillResult:
     if inp == "": return SkillResult.failure("backtest: no input provided")
-    var prices_csv = inp; var fast_p = 5; var slow_p = 20
-    var inp_n = inp.byte_length(); var inp_ptr = inp.unsafe_ptr()
-    var pk = String("prices:"); var pkl = pk.byte_length(); var pkp = pk.unsafe_ptr()
-    for i in range(inp_n - pkl + 1):
-        var hit = True
-        for j in range(pkl):
-            if inp_ptr[i+j] != pkp[j]: hit = False; break
-        if hit:
-            var k = i + pkl; var end = k
-            while end < inp_n and inp_ptr[end] != 32: end += 1
-            prices_csv = inp[k:end]; break
-    # fast:
-    var fk = String("fast:"); var fkl = fk.byte_length(); var fkp = fk.unsafe_ptr()
-    for i in range(inp_n - fkl + 1):
-        var hit = True
-        for j in range(fkl):
-            if inp_ptr[i+j] != fkp[j]: hit = False; break
-        if hit:
-            var k = i + fkl; var end = k
-            while end < inp_n and inp_ptr[end] != 32: end += 1
-            var tok = inp[k:end]; var tp = tok.unsafe_ptr(); var tv = 0
-            for ci in range(tok.byte_length()):
-                if tp[ci] >= 48 and tp[ci] <= 57: tv = tv * 10 + Int(tp[ci]) - 48
-            if tv > 0: fast_p = tv; break
-    # slow:
-    var sk = String("slow:"); var skl = sk.byte_length(); var skp = sk.unsafe_ptr()
-    for i in range(inp_n - skl + 1):
-        var hit = True
-        for j in range(skl):
-            if inp_ptr[i+j] != skp[j]: hit = False; break
-        if hit:
-            var k = i + skl; var end = k
-            while end < inp_n and inp_ptr[end] != 32: end += 1
-            var tok = inp[k:end]; var tp = tok.unsafe_ptr(); var tv = 0
-            for ci in range(tok.byte_length()):
-                if tp[ci] >= 48 and tp[ci] <= 57: tv = tv * 10 + Int(tp[ci]) - 48
-            if tv > 0: slow_p = tv; break
+    var prices_csv = _kv_token(inp, "prices:") if _contains(inp, "prices:") else inp
+    var fast_p = _kv_int(inp, "fast:", 5)
+    var slow_p = _kv_int(inp, "slow:", 20)
     var prices = _parse_csv_floats(prices_csv); var n = len(prices)
     if n < slow_p + 2:
         return SkillResult.failure("backtest: need at least " + String(slow_p + 2) + " prices")

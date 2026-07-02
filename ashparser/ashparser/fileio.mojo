@@ -14,7 +14,7 @@ never touched. The returned Input borrows StreamingInput's internal buffer and
 is only valid until the next call to next_line() or next_chunk().
 """
 
-from pathlib import Path
+from std.pathlib import Path
 from std.ffi import external_call
 from ashparser.input import Input
 
@@ -66,7 +66,7 @@ struct StreamingInput(Movable, ImplicitlyDeletable):
     across another next_line() / next_chunk() call.
     """
     var _fd:            Int32
-    var _buf:           UnsafePointer[UInt8]
+    var _buf:           UnsafePointer[UInt8, MutAnyOrigin]
     var _chunk_size:    Int
     var _buf_pos:       Int    # current read cursor inside buffer
     var _buf_len:       Int    # number of valid bytes in buffer
@@ -75,7 +75,7 @@ struct StreamingInput(Movable, ImplicitlyDeletable):
     var _last_truncated: Bool  # True if last next_line() was truncated at chunk_size
     var _owned:         Bool   # True when this instance owns fd + buf
 
-    def __init__(out self, fd: Int32, buf: UnsafePointer[UInt8], chunk_size: Int):
+    def __init__(out self, fd: Int32, buf: UnsafePointer[UInt8, MutAnyOrigin], chunk_size: Int):
         self._fd             = fd
         self._buf            = buf
         self._chunk_size     = chunk_size
@@ -98,10 +98,10 @@ struct StreamingInput(Movable, ImplicitlyDeletable):
         self._owned          = other._owned
         other._owned         = False   # transfer ownership
 
-    def __del__(owned self):
+    def __del__(deinit self):
         if self._owned:
             _ = external_call["close", Int32](self._fd)
-            self._buf.free()
+            _ = external_call["free", NoneType](self._buf)
 
     # ── Construction ─────────────────────────────────────────────────────────
 
@@ -117,7 +117,7 @@ struct StreamingInput(Movable, ImplicitlyDeletable):
         var fd = external_call["open", Int32](path.unsafe_ptr(), Int32(0x80000))
         if fd < 0:
             raise Error("StreamingInput: cannot open '" + path + "'")
-        var buf = UnsafePointer[UInt8].alloc(chunk_size)
+        var buf = external_call["malloc", UnsafePointer[UInt8, MutAnyOrigin]](chunk_size)
         var s   = StreamingInput(fd, buf, chunk_size)
         s._fill()
         return s^
@@ -214,7 +214,7 @@ struct StreamingInput(Movable, ImplicitlyDeletable):
         var leftover = self._buf_len - self._buf_pos
         if leftover > 0 and self._buf_pos > 0:
             # memmove handles the overlapping-region case correctly.
-            _ = external_call["memmove", UnsafePointer[UInt8]](
+            _ = external_call["memmove", UnsafePointer[UInt8, MutAnyOrigin]](
                 self._buf, self._buf.offset(self._buf_pos), leftover
             )
 

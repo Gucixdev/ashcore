@@ -12,6 +12,7 @@ Thread-safety: none.  Use one Arena per thread or pair with SharedArena.
 """
 
 from std.memory import UnsafePointer, memset_zero, memcpy
+from std.ffi import external_call
 from ashcore.debug import DEBUG, dbg_positive, dbg_power_of_two, dbg_assert
 
 comptime CACHE_LINE:     Int = 64               # AVX-512 / cache-line alignment
@@ -27,17 +28,26 @@ def _align_up(offset: Int, alignment: Int) -> Int:
 
 @always_inline
 def _slab_new(n: Int) -> Int:
-    """Allocate n bytes; returns raw address (Int).  Panics on OOM in debug."""
-    var ptr = UnsafePointer[UInt8].alloc(n)
+    """Allocate n bytes, CACHE_LINE-aligned; returns raw address (Int).
+
+    n must already be a multiple of CACHE_LINE (aligned_alloc's contract) -
+    callers round via _align_up(n, CACHE_LINE) before calling this. Plain
+    malloc() only guarantees ~16-byte alignment, which silently breaks
+    every CACHE_LINE-aligned offset alloc_simd/alloc compute relative to
+    the slab base.
+    """
+    var ptr = external_call["aligned_alloc", UnsafePointer[UInt8, MutAnyOrigin]](CACHE_LINE, n)
     if DEBUG:
-        dbg_assert(Int(ptr) != 0, "Arena._slab_new: malloc returned null")
+        dbg_assert(Int(ptr) != 0, "Arena._slab_new: aligned_alloc returned null")
     return Int(ptr)
 
 @always_inline
 def _slab_del(addr: Int):
     """Free a slab by raw address."""
     if addr != 0:
-        UnsafePointer[UInt8](unsafe_from_address=addr).free()
+        _ = external_call["free", NoneType](
+            UnsafePointer[UInt8, MutAnyOrigin](unsafe_from_address=addr)
+        )
 
 
 # ── ArenaCheckpoint ───────────────────────────────────────────────────────────
@@ -65,7 +75,7 @@ struct Arena(Movable):
     alloc() larger than the default slab size) are freed on reset() to prevent
     memory bloat across request / frame cycles.
 
-    Returned pointers carry __origin_of(self): the compiler enforces that the
+    Returned pointers carry origin_of(self): the compiler enforces that the
     Arena outlives any allocation.  reset() / restore() rewind the bump pointer
     logically — existing pointers become dangling but the type system cannot
     detect that (inherent arena limitation).
@@ -83,7 +93,7 @@ struct Arena(Movable):
     var _rgn_sz: Int          # target slab size; oversized slabs freed on reset()
 
     def __init__(out self, region_size: Int = REGION_DEFAULT):
-        self._rgn_sz = region_size if region_size > 0 else REGION_DEFAULT
+        self._rgn_sz = _align_up(region_size if region_size > 0 else REGION_DEFAULT, CACHE_LINE)
         self._region = 0
         self._pos    = 0
         self._peak   = 0
@@ -93,7 +103,7 @@ struct Arena(Movable):
         self._ptrs.append(addr)
         self._sizes.append(self._rgn_sz)
 
-    def __del__(owned self):
+    def __del__(deinit self):
         for i in range(len(self._ptrs)):
             _slab_del(self._ptrs[i])
 
@@ -111,7 +121,7 @@ struct Arena(Movable):
         mut self,
         size:      Int,
         alignment: Int = CACHE_LINE,
-    ) -> UnsafePointer[UInt8, __origin_of(self)]:
+    ) -> UnsafePointer[UInt8, origin_of(self)]:
         """
         Bump-allocate `size` aligned bytes.  Never raises; grows into a new
         slab when the current one is full.
@@ -142,13 +152,13 @@ struct Arena(Movable):
         if total > self._peak:
             self._peak = total
 
-        return UnsafePointer[UInt8, __origin_of(self)](unsafe_from_address=addr)
+        return UnsafePointer[UInt8, origin_of(self)](unsafe_from_address=addr)
 
     def alloc_zeroed(
         mut self,
         size:      Int,
         alignment: Int = CACHE_LINE,
-    ) -> UnsafePointer[UInt8, __origin_of(self)]:
+    ) -> UnsafePointer[UInt8, origin_of(self)]:
         """alloc() then zero the bytes."""
         var ptr = self.alloc(size, alignment)
         memset_zero(ptr, size)
@@ -156,14 +166,23 @@ struct Arena(Movable):
 
     def alloc_simd[dtype: DType, width: Int](
         mut self,
-    ) -> UnsafePointer[Scalar[dtype], __origin_of(self)]:
+    ) -> UnsafePointer[Scalar[dtype], origin_of(self)]:
         """
         Allocate CACHE_LINE-aligned storage for SIMD[dtype, width].
         Returns UnsafePointer[Scalar[dtype]] ready for SIMD.load() / .store().
         """
-        var n_bytes = width * dtype.sizeof()
+        var elem_bytes: Int
+        if dtype == DType.float64 or dtype == DType.int64 or dtype == DType.uint64:
+            elem_bytes = 8
+        elif dtype == DType.float32 or dtype == DType.int32 or dtype == DType.uint32:
+            elem_bytes = 4
+        elif dtype == DType.bfloat16 or dtype == DType.float16 or dtype == DType.int16 or dtype == DType.uint16:
+            elem_bytes = 2
+        else:
+            elem_bytes = 1
+        var n_bytes = width * elem_bytes
         var raw = self.alloc(n_bytes, CACHE_LINE)
-        return UnsafePointer[Scalar[dtype], __origin_of(self)](
+        return UnsafePointer[Scalar[dtype], origin_of(self)](
             unsafe_from_address=Int(raw)
         )
 
@@ -171,7 +190,7 @@ struct Arena(Movable):
         mut self,
         s:         String,
         alignment: Int = 1,
-    ) -> UnsafePointer[UInt8, __origin_of(self)]:
+    ) -> UnsafePointer[UInt8, origin_of(self)]:
         """Copy string bytes (null-terminated) into the arena."""
         var n   = s.byte_length() + 1
         var dst = self.alloc(n, alignment)
@@ -220,11 +239,11 @@ struct Arena(Movable):
         """Rewind and zero previously used bytes (prevents data leakage)."""
         for i in range(self._region):
             memset_zero(
-                UnsafePointer[UInt8](unsafe_from_address=self._ptrs[i]),
+                UnsafePointer[UInt8, MutAnyOrigin](unsafe_from_address=self._ptrs[i]),
                 self._sizes[i],
             )
         memset_zero(
-            UnsafePointer[UInt8](unsafe_from_address=self._ptrs[self._region]),
+            UnsafePointer[UInt8, MutAnyOrigin](unsafe_from_address=self._ptrs[self._region]),
             self._pos,
         )
         self.reset()
@@ -288,7 +307,7 @@ struct Arena(Movable):
         # No suitable slab — allocate a fresh one.
         # If min_size > _rgn_sz the slab is "oversized" and will be freed on
         # the next reset() call to prevent long-lived memory bloat.
-        var sz   = self._rgn_sz if self._rgn_sz >= min_size else min_size
+        var sz   = self._rgn_sz if self._rgn_sz >= min_size else _align_up(min_size, CACHE_LINE)
         var addr = _slab_new(sz)
         self._ptrs.append(addr)
         self._sizes.append(sz)

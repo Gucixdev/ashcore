@@ -2,7 +2,7 @@
 
 from std.atomic    import Atomic
 from std.algorithm import parallelize
-from ashcore.queue import SPSCQueue, PopResult
+from ashcore.queue import SPSCQueue
 from ashcore.sync  import TicketLock, Semaphore
 from ashcore.debug import DEBUG, dbg_assert
 from ashcore.threadpool import ThreadPool

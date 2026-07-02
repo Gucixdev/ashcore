@@ -3,7 +3,6 @@
 from std.atomic    import Atomic
 from std.algorithm import parallelize
 from std.sys       import num_physical_cores
-from ashcore.debug import DEBUG, dbg_assert
 
 
 comptime MAX_WORKERS: Int = 256
