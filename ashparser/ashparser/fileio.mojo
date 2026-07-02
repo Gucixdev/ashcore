@@ -98,7 +98,7 @@ struct StreamingInput(Movable, ImplicitlyDeletable):
         self._owned          = other._owned
         other._owned         = False   # transfer ownership
 
-    def __del__(self):
+    def __del__(deinit self):
         if self._owned:
             _ = external_call["close", Int32](self._fd)
             self._buf.free()

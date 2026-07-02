@@ -63,11 +63,11 @@ struct P[T: Copyable & Movable & ImplicitlyDeletable,
     # ── Call / convenience ────────────────────────────────────────────────────
 
     @always_inline
-    def __call__(self, inp: Input) -> ParseResult[T]:
+    def __call__(self, inp: Input) -> ParseResult[Self.T]:
         return run(inp)^
 
     @always_inline
-    def parse(self, s: String) -> ParseResult[T]:
+    def parse(self, s: String) -> ParseResult[Self.T]:
         """Parse a String directly — creates Input internally."""
         return run(Input.from_string(s))^
 

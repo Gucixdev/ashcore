@@ -93,7 +93,7 @@ struct Arena(Movable):
         self._ptrs.append(addr)
         self._sizes.append(self._rgn_sz)
 
-    def __del__(self):
+    def __del__(deinit self):
         for i in range(len(self._ptrs)):
             _slab_del(self._ptrs[i])
 
